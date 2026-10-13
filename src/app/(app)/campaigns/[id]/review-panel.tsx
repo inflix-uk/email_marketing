@@ -9,6 +9,7 @@ import { ScheduleForm, SendNowButton, SendTestForm } from "./send-controls";
 /** Point each blocking problem at the part of the page that fixes it. */
 function fixFor(problem: string): { href: string; label: string } | null {
   const p = problem.toLowerCase();
+  if (p.includes("subject b") || p.includes("a/b")) return { href: "#abSubjectB", label: "Edit A/B test" };
   if (p.includes("subject")) return { href: "#subject", label: "Edit subject" };
   if (p.includes("unsubscribe")) return { href: "#content", label: "Edit content" };
   if (p.includes("smtp") || p.includes("company address") || p.includes("postal")) {
@@ -16,8 +17,14 @@ function fixFor(problem: string): { href: string; label: string } | null {
   }
   if (p.includes("reply")) return { href: "#replyTo", label: "Edit reply-to" };
   if (p.includes("from") || p.includes("sender")) return { href: "#sender", label: "Edit sender" };
-  if (p.includes("list") || p.includes("recipient") || p.includes("audience") || p.includes("contact")) {
-    return { href: "#audience", label: "Choose lists" };
+  if (
+    p.includes("list") ||
+    p.includes("segment") ||
+    p.includes("recipient") ||
+    p.includes("audience") ||
+    p.includes("contact")
+  ) {
+    return { href: "#audience", label: "Choose audience" };
   }
   if (p.includes("content") || p.includes("html") || p.includes("body") || p.includes("empty")) {
     return { href: "#content", label: "Edit content" };

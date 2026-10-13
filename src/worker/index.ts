@@ -4,7 +4,9 @@ import { closeMailer } from "@/lib/mailer";
 import { runWorker } from "./loop";
 
 // Background sender: queues scheduled campaigns when due, sends queued emails
-// at the rate set on the Settings page, and marks campaigns "sent" when done.
+// at the rate (and up to the daily limit) set on the Settings page, picks A/B
+// test winners, pauses campaigns that bounce too much, sends due automation
+// emails, and marks campaigns "sent" when done.
 // Before /setup has been completed it just waits for the database.
 //
 //   npm run worker            run forever (Ctrl+C / SIGTERM stops gracefully)

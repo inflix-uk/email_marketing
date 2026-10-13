@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 import { Alert } from "@/components/ui/form";
 import { Card, CardBody, CardHeader, EmptyState, PageHeader, StatusBadge, Table, TBody, Td, Th } from "@/components/ui/layout";
-import { getContact, getContactActivity, getListOptions } from "@/lib/contacts/queries";
+import { getContact, getContactActivity, getListOptions, getTagOptions } from "@/lib/contacts/queries";
 import { formatDateTime } from "@/lib/utils";
 import {
   deleteContactAction,
@@ -20,7 +21,29 @@ type Props = {
   searchParams: Promise<{ created?: string }>;
 };
 
-const SOURCE_LABELS: Record<string, string> = { manual: "Added manually", import: "CSV import", api: "API" };
+const SOURCE_LABELS: Record<string, string> = {
+  manual: "Added manually",
+  import: "CSV import",
+  api: "API",
+  form: "Sign-up form",
+  suppression: "Suppression list",
+};
+
+/** "form:<id>" -> "Sign-up form"; unknown values are shown as they are. */
+function sourceLabel(source: string | null | undefined): string {
+  if (!source) return "—";
+  if (source === "form" || source.startsWith("form:")) return "Sign-up form";
+  return SOURCE_LABELS[source] ?? source;
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex justify-between gap-4">
+      <dt className="shrink-0 text-slate-500">{label}</dt>
+      <dd className="text-right text-slate-900">{children}</dd>
+    </div>
+  );
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
@@ -31,8 +54,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function ContactPage({ params, searchParams }: Props) {
   const { id } = await params;
   const { created } = await searchParams;
-  const [contact, lists, activity] = await Promise.all([getContact(id), getListOptions(), getContactActivity(id)]);
+  const [contact, lists, activity, tagOptions] = await Promise.all([
+    getContact(id),
+    getListOptions(),
+    getContactActivity(id),
+    getTagOptions(),
+  ]);
   if (!contact) notFound();
+  const { consent } = contact;
 
   const name = [contact.firstName, contact.lastName].filter(Boolean).join(" ");
 
@@ -70,7 +99,9 @@ export default async function ContactPage({ params, searchParams }: Props) {
               lastName: contact.lastName,
               fields: contact.fields,
               listIds: contact.listIds,
+              tags: contact.tags ?? [],
             }}
+            knownTags={tagOptions.map((t) => t.tag)}
             submitLabel="Save changes"
             pendingLabel="Saving..."
             cancelHref="/contacts"
@@ -89,19 +120,43 @@ export default async function ContactPage({ params, searchParams }: Props) {
             <CardHeader title="About" />
             <CardBody>
               <dl className="space-y-2 text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-slate-500">Source</dt>
-                  <dd className="text-right text-slate-900">{SOURCE_LABELS[contact.source ?? ""] ?? contact.source ?? "—"}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-slate-500">Added</dt>
-                  <dd className="text-right text-slate-900">{formatDateTime(contact.createdAt)}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-slate-500">Last updated</dt>
-                  <dd className="text-right text-slate-900">{formatDateTime(contact.updatedAt)}</dd>
-                </div>
+                <Row label="Source">{sourceLabel(contact.source)}</Row>
+                <Row label="Added">{formatDateTime(contact.createdAt)}</Row>
+                <Row label="Last updated">{formatDateTime(contact.updatedAt)}</Row>
               </dl>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader title="Consent" />
+            <CardBody>
+              {consent ? (
+                <dl className="space-y-2 text-sm">
+                  <Row label="Given via">{sourceLabel(consent.source)}</Row>
+                  <Row label="Date">{formatDateTime(consent.at)}</Row>
+                  {consent.confirmedAt ? <Row label="Confirmed">{formatDateTime(consent.confirmedAt)}</Row> : null}
+                  {consent.ip ? <Row label="IP address">{consent.ip}</Row> : null}
+                </dl>
+              ) : (
+                <p className="text-sm text-slate-500">No consent record for this contact.</p>
+              )}
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader title="Engagement" />
+            <CardBody>
+              <dl className="space-y-2 text-sm">
+                <Row label="Last emailed">{formatDateTime(contact.lastEmailedAt)}</Row>
+                <Row label="Last opened">{formatDateTime(contact.lastOpenedAt)}</Row>
+                <Row label="Last clicked">{formatDateTime(contact.lastClickedAt)}</Row>
+                {contact.bouncedAt ? <Row label="Bounced">{formatDateTime(contact.bouncedAt)}</Row> : null}
+              </dl>
+              {contact.bounceReason ? (
+                <p className="mt-3 break-words rounded-md bg-red-50 px-3 py-2 text-xs text-red-800 ring-1 ring-inset ring-red-200">
+                  <span className="font-medium">Bounce reason:</span> {contact.bounceReason}
+                </p>
+              ) : null}
             </CardBody>
           </Card>
 

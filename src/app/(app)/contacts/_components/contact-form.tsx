@@ -8,6 +8,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/layout";
 import type { ListRef } from "@/lib/contacts/queries";
 import { cn } from "@/lib/utils";
 import type { ContactFormState } from "../actions";
+import { TagEditor } from "./tag-editor";
 
 export interface ContactFormValues {
   email: string;
@@ -15,6 +16,7 @@ export interface ContactFormValues {
   lastName: string | null;
   fields: Record<string, string>;
   listIds: string[];
+  tags: string[];
 }
 
 interface FieldRow {
@@ -23,16 +25,17 @@ interface FieldRow {
   value: string;
 }
 
-const EMPTY: ContactFormValues = { email: "", firstName: null, lastName: null, fields: {}, listIds: [] };
+const EMPTY: ContactFormValues = { email: "", firstName: null, lastName: null, fields: {}, listIds: [], tags: [] };
 
 /**
- * Create / edit form for a contact: email, names, custom fields and list
- * memberships. Subscription status is managed separately on the contact page.
+ * Create / edit form for a contact: email, names, custom fields, list
+ * memberships and tags. Subscription status is managed separately on the contact page.
  */
 export function ContactForm({
   action,
   lists,
   initial = EMPTY,
+  knownTags,
   submitLabel,
   pendingLabel,
   cancelHref,
@@ -40,6 +43,8 @@ export function ContactForm({
   action: (state: ContactFormState, formData: FormData) => Promise<ContactFormState>;
   lists: ListRef[];
   initial?: ContactFormValues;
+  /** Tags already in use, suggested while typing. */
+  knownTags?: string[];
   submitLabel: string;
   pendingLabel: string;
   cancelHref: string;
@@ -201,6 +206,13 @@ export function ContactForm({
               </div>
             </fieldset>
           )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Tags" description="Free-form labels, e.g. vip or webinar-2026." />
+        <CardBody>
+          <TagEditor initial={initial.tags} suggestions={knownTags} error={errors.tags} />
         </CardBody>
       </Card>
 

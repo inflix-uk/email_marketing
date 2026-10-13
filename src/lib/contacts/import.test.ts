@@ -62,6 +62,9 @@ describe("detectColumnTarget", () => {
     ["Name", "full_name"],
     ["Full name", "full_name"],
     ["Company", "field"],
+    ["Tags", "tags"],
+    ["tag", "tags"],
+    ["Labels", "tags"],
     ["Email opt-in date", "field"],
   ];
   for (const [header, expected] of cases) {
@@ -102,8 +105,17 @@ describe("suggestMapping", () => {
   });
 
   test("de-duplicates custom field keys", () => {
-    const keys = suggestMapping(["Email", "Tag", "tag", "TAG"]).map((m) => m.fieldKey);
-    assert.deepEqual(keys, [undefined, "tag", "tag_2", "tag_3"]);
+    const keys = suggestMapping(["Email", "Team", "team", "TEAM"]).map((m) => m.fieldKey);
+    assert.deepEqual(keys, [undefined, "team", "team_2", "team_3"]);
+  });
+
+  test("maps tag columns to Tags - more than one is allowed", () => {
+    assert.deepEqual(suggestMapping(["Email", "Tags", "Labels", "City"]), [
+      { target: "email" },
+      { target: "tags" },
+      { target: "tags" },
+      { target: "field", fieldKey: "city" },
+    ]);
   });
 
   test("always produces a valid mapping when there is an email column", () => {
@@ -140,6 +152,10 @@ describe("validateMapping", () => {
       )!,
       /same custom field/,
     );
+  });
+
+  test("several tag columns are fine and need no key", () => {
+    assert.equal(validateMapping([{ target: "email" }, { target: "tags" }, { target: "tags" }], 3), null);
   });
 
   test("ignored columns need no key", () => {
@@ -181,7 +197,7 @@ describe("mapRows", () => {
   test("maps cells, lower-cases emails and drops empty values", () => {
     const result = mapRows([[" Jane@Example.COM ", "Jane", "", "Acme", "secret"]], mapping);
     assert.deepEqual(result.contacts, [
-      { email: "jane@example.com", firstName: "Jane", lastName: undefined, fields: { company: "Acme" } },
+      { email: "jane@example.com", firstName: "Jane", lastName: undefined, fields: { company: "Acme" }, tags: [] },
     ]);
     assert.equal(result.totalRows, 1);
   });
@@ -227,8 +243,8 @@ describe("mapRows", () => {
     );
     assert.equal(result.duplicateCount, 2);
     assert.deepEqual(result.contacts, [
-      { email: "jane@example.com", firstName: "Janet", lastName: "Smith", fields: { company: "Globex" } },
-      { email: "bob@example.com", firstName: "Bob", lastName: undefined, fields: {} },
+      { email: "jane@example.com", firstName: "Janet", lastName: "Smith", fields: { company: "Globex" }, tags: [] },
+      { email: "bob@example.com", firstName: "Bob", lastName: undefined, fields: {}, tags: [] },
     ]);
   });
 
@@ -252,7 +268,9 @@ describe("mapRows", () => {
 
   test("tolerates short rows", () => {
     const result = mapRows([["jane@example.com"]], mapping);
-    assert.deepEqual(result.contacts, [{ email: "jane@example.com", firstName: undefined, lastName: undefined, fields: {} }]);
+    assert.deepEqual(result.contacts, [
+      { email: "jane@example.com", firstName: undefined, lastName: undefined, fields: {}, tags: [] },
+    ]);
   });
 
   test("works end-to-end with parseCsv and suggestMapping", () => {
@@ -261,8 +279,48 @@ describe("mapRows", () => {
     assert.equal(validateMapping(mapping, headers.length), null);
     const result = mapRows(rows, mapping);
     assert.deepEqual(result.contacts, [
-      { email: "jane@example.com", firstName: "Jane", lastName: "Doe", fields: { company: "Acme" } },
+      { email: "jane@example.com", firstName: "Jane", lastName: "Doe", fields: { company: "Acme" }, tags: [] },
     ]);
     assert.equal(result.invalidCount, 1);
+  });
+
+  test("splits tag cells on commas and semicolons, lower-cases and de-duplicates", () => {
+    const m: ColumnMapping[] = [{ target: "email" }, { target: "tags" }];
+    const result = mapRows(
+      [
+        ["jane@example.com", " VIP, Early  Bird ;vip;; "],
+        ["bob@example.com", ""],
+      ],
+      m,
+    );
+    assert.deepEqual(
+      result.contacts.map((c) => c.tags),
+      [["vip", "early bird"], []],
+    );
+  });
+
+  test("combines several tag columns and the tags of duplicate rows", () => {
+    const m: ColumnMapping[] = [{ target: "email" }, { target: "tags" }, { target: "tags" }];
+    const result = mapRows(
+      [
+        ["jane@example.com", "vip", "webinar-2026"],
+        ["JANE@example.com", "customer, VIP", ""],
+      ],
+      m,
+    );
+    assert.equal(result.duplicateCount, 1);
+    assert.deepEqual(result.contacts[0].tags, ["vip", "webinar-2026", "customer"]);
+  });
+
+  test("cuts over-long tags instead of failing the row", () => {
+    const result = mapRows([["jane@example.com", "x".repeat(80)]], [{ target: "email" }, { target: "tags" }]);
+    assert.deepEqual(result.contacts[0].tags, ["x".repeat(50)]);
+  });
+
+  test("end-to-end: a Tags header is detected and imported", () => {
+    const { headers, rows } = parseCsv('email,tags\njane@example.com,"News, VIP"\n');
+    const mapping = suggestMapping(headers);
+    assert.deepEqual(mapping, [{ target: "email" }, { target: "tags" }]);
+    assert.deepEqual(mapRows(rows, mapping).contacts[0].tags, ["news", "vip"]);
   });
 });

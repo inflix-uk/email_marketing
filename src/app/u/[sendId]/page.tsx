@@ -4,7 +4,8 @@ import { getLinkContext, verifyUnsubscribe } from "@/lib/tokens";
 import { UnsubscribeCard } from "../unsubscribe-card";
 import { UnsubscribeForm } from "./unsubscribe-form";
 
-// Public page linked from every campaign email (see src/proxy.ts).
+// Public page linked from every campaign and automation email (see
+// src/proxy.ts): leave individual lists, or unsubscribe from all emails.
 
 export const metadata: Metadata = {
   title: { absolute: "Unsubscribe" },
@@ -63,13 +64,17 @@ export default async function UnsubscribePage({
     );
   }
 
+  const { email, contactStatus, lists } = result.info;
+  const active = contactStatus === "subscribed" || contactStatus === "pending";
+
   return (
-    <UnsubscribeCard title="Unsubscribe">
+    <UnsubscribeCard title={active && lists.length > 0 ? "Email preferences" : "Unsubscribe"}>
       <UnsubscribeForm
         sendId={sendId}
         signature={signature}
-        maskedEmail={maskEmail(result.info.email)}
-        alreadyUnsubscribed={result.info.contactStatus !== "subscribed"}
+        maskedEmail={maskEmail(email)}
+        alreadyUnsubscribed={!active}
+        lists={lists}
       />
     </UnsubscribeCard>
   );

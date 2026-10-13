@@ -79,3 +79,52 @@ export function insertText(start: number, end: number, text: string): TextEdit {
 export function applyTextEdit(value: string, edit: TextEdit): string {
   return value.slice(0, edit.from) + edit.text + value.slice(edit.to);
 }
+
+// --- Simple rich text (visual editor): **bold**, *italic*, [text](url) -------
+
+/** True when the "*" at `index` is a lone star, not half of a "**" pair. */
+function isLoneStar(value: string, index: number): boolean {
+  return value[index] === "*" && value[index - 1] !== "*" && value[index + 1] !== "*";
+}
+
+/**
+ * Wrap the selection in a marker ("**" for bold, "*" for italic), or remove
+ * the marker when the selection is already wrapped in it. With nothing
+ * selected, inserts `placeholder` and selects it so typing replaces it.
+ */
+export function toggleWrap(value: string, start: number, end: number, marker: "**" | "*", placeholder = "text"): TextEdit {
+  const size = marker.length;
+  const before = start - size;
+  const wrapped =
+    before >= 0 &&
+    value.slice(before, start) === marker &&
+    value.slice(end, end + size) === marker &&
+    (marker === "**" || (isLoneStar(value, before) && isLoneStar(value, end)));
+  if (wrapped) {
+    const text = value.slice(start, end);
+    return { from: before, to: end + size, text, selectionStart: before, selectionEnd: before + text.length };
+  }
+  const inner = value.slice(start, end) || placeholder;
+  return {
+    from: start,
+    to: end,
+    text: marker + inner + marker,
+    selectionStart: start + size,
+    selectionEnd: start + size + inner.length,
+  };
+}
+
+export const LINK_URL_PLACEHOLDER = "https://";
+
+/** Turn the selection into "[selection](https://)" with the address selected, ready to type or paste over. */
+export function insertLink(value: string, start: number, end: number, placeholder = "link text"): TextEdit {
+  const label = value.slice(start, end).replace(/\n+/g, " ") || placeholder;
+  const urlStart = start + label.length + 3; // "[" + label + "]("
+  return {
+    from: start,
+    to: end,
+    text: `[${label}](${LINK_URL_PLACEHOLDER})`,
+    selectionStart: urlStart,
+    selectionEnd: urlStart + LINK_URL_PLACEHOLDER.length,
+  };
+}

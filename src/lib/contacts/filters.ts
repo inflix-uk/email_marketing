@@ -1,8 +1,9 @@
 import type { Filter } from "mongodb";
 import { CONTACT_STATUSES, type ContactDoc, type ContactStatus } from "@/db/schema";
+import { MAX_TAG_LENGTH, normalizeTag } from "./tags";
 
-// Filters shared by the contacts table, its pagination and the CSV export
-// (?q= ?status= ?list= ?page=). Builds MongoDB filters but never touches the
+// Filters shared by the contacts table, its pagination, bulk actions and the
+// CSV export (?q= ?status= ?list= ?tag= ?page=). Builds MongoDB filters but never touches the
 // connection, so it is safe to import from client components and tests.
 
 export const CONTACTS_PAGE_SIZE = 50;
@@ -11,7 +12,18 @@ export interface ContactFilters {
   q?: string;
   status?: ContactStatus;
   listId?: string;
+  /** Normalised (lower-cased) tag. */
+  tag?: string;
 }
+
+/** Labels for every contact status, in display order (filters, stats). */
+export const CONTACT_STATUS_LABELS: Record<ContactStatus, string> = {
+  subscribed: "Subscribed",
+  pending: "Pending",
+  unsubscribed: "Unsubscribed",
+  bounced: "Bounced",
+  complained: "Complained",
+};
 
 type RawParams = Record<string, string | string[] | undefined>;
 
@@ -23,13 +35,20 @@ function first(value: string | string[] | undefined): string {
 export function parseContactFilters(params: RawParams | URLSearchParams): ContactFilters {
   const get = (key: string) =>
     params instanceof URLSearchParams ? (params.get(key)?.trim() ?? "") : first(params[key]);
-  const q = get("q").slice(0, 200);
-  const status = get("status");
-  const listId = get("list");
+  return cleanContactFilters({ q: get("q"), status: get("status"), listId: get("list"), tag: get("tag") });
+}
+
+/** Same clean-up for filters that arrive as an object (e.g. from a bulk action). */
+export function cleanContactFilters(raw: { q?: string | null; status?: string | null; listId?: string | null; tag?: string | null }): ContactFilters {
+  const q = (raw.q ?? "").trim().slice(0, 200);
+  const status = raw.status ?? "";
+  const listId = (raw.listId ?? "").trim();
+  const tag = normalizeTag(raw.tag ?? "").slice(0, MAX_TAG_LENGTH);
   return {
     q: q || undefined,
     status: (CONTACT_STATUSES as readonly string[]).includes(status) ? (status as ContactStatus) : undefined,
     listId: listId || undefined,
+    tag: tag || undefined,
   };
 }
 
@@ -40,7 +59,7 @@ export function parsePage(value: string | string[] | undefined): number {
 }
 
 export function hasFilters(f: ContactFilters): boolean {
-  return Boolean(f.q || f.status || f.listId);
+  return Boolean(f.q || f.status || f.listId || f.tag);
 }
 
 /** Query-string for the given filters (and optional page), without a leading "?". */
@@ -49,6 +68,7 @@ export function filtersToSearchParams(f: ContactFilters, page?: number): URLSear
   if (f.q) params.set("q", f.q);
   if (f.status) params.set("status", f.status);
   if (f.listId) params.set("list", f.listId);
+  if (f.tag) params.set("tag", f.tag);
   if (page && page > 1) params.set("page", String(page));
   return params;
 }
@@ -84,6 +104,7 @@ export function contactFilter(f: ContactFilters): Filter<ContactDoc> {
   return {
     ...(f.status ? { status: f.status } : {}),
     ...(f.listId ? { listIds: f.listId } : {}),
+    ...(f.tag ? { tags: f.tag } : {}),
     ...(f.q ? contactSearchFilter(f.q) : {}),
   };
 }

@@ -104,6 +104,7 @@ async function seed(db: Collections) {
     subject: t.subject,
     previewText: t.previewText || null,
     html: t.html,
+    design: t.design,
     createdAt: nowDate,
     updatedAt: nowDate,
   }));
@@ -152,6 +153,7 @@ async function seed(db: Collections) {
     fromEmail: settings.fromEmail || "hello@example.com",
     replyTo: settings.replyTo || null,
     html: starterNewsletter.html,
+    design: starterNewsletter.design,
     templateId: newsletterTemplate._id,
     listIds: [newsletterList._id],
     status: "draft",

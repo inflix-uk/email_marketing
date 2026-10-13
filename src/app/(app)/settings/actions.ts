@@ -168,6 +168,31 @@ export async function saveSending(_prev: SettingsFormState, formData: FormData):
 }
 
 // ---------------------------------------------------------------------------
+// Deliverability
+// ---------------------------------------------------------------------------
+
+const deliverabilitySchema = z.object({
+  dailySendLimit: z
+    .string()
+    .trim()
+    .refine((v) => /^\d{1,8}$/.test(v), "Enter a whole number (0 = unlimited)")
+    .transform(Number),
+  bouncePauseRate: z
+    .string()
+    .trim()
+    .refine((v) => /^\d{1,3}(\.\d)?$/.test(v) && Number(v) <= 100, "Enter a percentage from 0 to 100 (0 = off)")
+    .transform(Number),
+});
+
+export async function saveDeliverability(_prev: SettingsFormState, formData: FormData): Promise<SettingsFormState> {
+  await requireSession();
+  const parsed = deliverabilitySchema.safeParse(fields(formData));
+  if (!parsed.success) return invalid(parsed.error);
+  await updateSettings(parsed.data);
+  return saved();
+}
+
+// ---------------------------------------------------------------------------
 // Test email
 // ---------------------------------------------------------------------------
 

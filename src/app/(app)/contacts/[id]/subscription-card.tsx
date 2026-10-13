@@ -9,6 +9,7 @@ import { formatDateTime } from "@/lib/utils";
 import type { SubscriptionState } from "../actions";
 
 const EXPLANATIONS: Record<Exclude<ContactStatus, "subscribed">, string> = {
+  pending: "Signed up through a form but hasn't clicked the confirmation link yet. They won't receive campaigns until confirmed.",
   unsubscribed: "This person opted out. They won't receive any campaigns.",
   bounced: "Emails to this address bounced, so it's excluded from sending.",
   complained: "This person marked one of your emails as spam. They won't receive any campaigns.",
@@ -27,13 +28,20 @@ export function SubscriptionCard({
   resubscribeAction: (state: SubscriptionState, formData: FormData) => Promise<SubscriptionState>;
 }) {
   const [consent, setConsent] = useState(false);
+  // The server action is passed straight in, so the Unsubscribe button also works before / without JS.
   const [unsubState, unsubscribe] = useActionState(unsubscribeAction, {});
   const [resubState, resubscribe] = useActionState(async (prev: SubscriptionState, formData: FormData) => {
     const next = await resubscribeAction(prev, formData);
     setConsent(false); // React resets the form after the action; keep the checkbox state in sync
     return next;
   }, {});
-  const result = status === "subscribed" ? unsubState : resubState;
+  // A successful action flips the status, so the card switches view: in the
+  // subscribed view a success can only come from (re-)subscribing, and vice versa.
+  const result: SubscriptionState =
+    status === "subscribed"
+      ? { message: resubState.message, error: unsubState.error }
+      : { message: unsubState.message, error: resubState.error };
+  const pending = status === "pending";
 
   return (
     <Card>
@@ -54,14 +62,14 @@ export function SubscriptionCard({
           <>
             <div className="text-sm text-slate-600">
               <p>{EXPLANATIONS[status]}</p>
-              {unsubscribedAt ? (
+              {unsubscribedAt && !pending ? (
                 <p className="mt-1 text-slate-500">
                   {status === "unsubscribed" ? "Unsubscribed" : "Since"} {formatDateTime(unsubscribedAt)}
                 </p>
               ) : null}
             </div>
             <form action={resubscribe} className="space-y-3 rounded-md bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
-              <p className="text-sm font-medium text-slate-900">Re-subscribe</p>
+              <p className="text-sm font-medium text-slate-900">{pending ? "Confirm by hand" : "Re-subscribe"}</p>
               <label className="flex items-start gap-2 text-sm text-slate-700">
                 <input
                   type="checkbox"
@@ -70,10 +78,14 @@ export function SubscriptionCard({
                   onChange={(e) => setConsent(e.target.checked)}
                   className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600"
                 />
-                <span>I have this person&apos;s consent to email them again.</span>
+                <span>
+                  {pending
+                    ? "I have this person's consent to email them."
+                    : "I have this person's consent to email them again."}
+                </span>
               </label>
-              <SubmitButton variant="secondary" size="sm" disabled={!consent} pendingText="Re-subscribing...">
-                Re-subscribe contact
+              <SubmitButton variant="secondary" size="sm" disabled={!consent} pendingText={pending ? "Confirming..." : "Re-subscribing..."}>
+                {pending ? "Confirm subscription" : "Re-subscribe contact"}
               </SubmitButton>
             </form>
           </>

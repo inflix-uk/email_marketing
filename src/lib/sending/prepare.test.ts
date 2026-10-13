@@ -10,6 +10,7 @@ import {
   verifyUnsubscribe,
   type LinkContext,
 } from "@/lib/tokens";
+import { subjectForVariant } from "./ab";
 import {
   appendUnsubscribeFooter,
   buildCampaignEmail,
@@ -327,5 +328,28 @@ describe("build context (links + company address)", () => {
   it("hasUnsubscribeTag ignores tags inside comments", () => {
     assert.equal(hasUnsubscribeTag("<!-- {{unsubscribe_url}} -->"), false);
     assert.equal(hasUnsubscribeTag('<a href="{{ Unsubscribe_Url }}">x</a>'), true);
+  });
+});
+
+describe("A/B subject lines", () => {
+  const abTest = { subjectB: "{{first_name}}, a question", testPercent: 20, waitHours: 4, winner: null, decidedAt: null };
+  const build = (variant: "A" | "B" | null, winner: "A" | "B" | null = null) => {
+    const base = campaign({ subject: "News for {{first_name}}" });
+    const subject = subjectForVariant(base.subject, { ...abTest, winner }, variant);
+    return buildCampaignEmail({ ...base, subject }, { ...contact, firstName: "Ann" }, SEND_ID, CTX);
+  };
+
+  it("builds each variant with its own subject (merge tags rendered) and identical content", () => {
+    const a = build("A");
+    const b = build("B");
+    assert.equal(a.subject, "News for Ann");
+    assert.equal(b.subject, "Ann, a question");
+    assert.equal(a.html, b.html);
+    assert.deepEqual(a.headers, b.headers);
+  });
+
+  it("gives non-test recipients the winning subject", () => {
+    assert.equal(build(null, "B").subject, "Ann, a question");
+    assert.equal(build(null, "A").subject, "News for Ann");
   });
 });

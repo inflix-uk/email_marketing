@@ -1,5 +1,6 @@
 import Papa from "papaparse";
 import { isValidEmail, normalizeEmail } from "../utils";
+import { parseTags } from "./tags";
 import { fieldKeyError, slugifyFieldKey } from "./validation";
 
 // Pure CSV-import logic, shared by the browser (preview + column mapping) and
@@ -11,7 +12,7 @@ export const MAX_IMPORT_ROWS = 100_000;
 /** How many invalid rows are reported back individually. */
 export const MAX_INVALID_EXAMPLES = 20;
 
-export const COLUMN_TARGETS = ["email", "first_name", "last_name", "full_name", "field", "ignore"] as const;
+export const COLUMN_TARGETS = ["email", "first_name", "last_name", "full_name", "tags", "field", "ignore"] as const;
 export type ColumnTarget = (typeof COLUMN_TARGETS)[number];
 
 export const COLUMN_TARGET_LABELS: Record<ColumnTarget, string> = {
@@ -19,6 +20,7 @@ export const COLUMN_TARGET_LABELS: Record<ColumnTarget, string> = {
   first_name: "First name",
   last_name: "Last name",
   full_name: "Full name",
+  tags: "Tags",
   field: "Custom field",
   ignore: "Don't import",
 };
@@ -57,6 +59,7 @@ const HEADER_ALIASES: [DetectedTarget, string[]][] = [
   ["first_name", ["firstname", "first", "givenname", "forename", "fname"]],
   ["last_name", ["lastname", "last", "surname", "familyname", "lname"]],
   ["full_name", ["name", "fullname", "contactname", "displayname"]],
+  ["tags", ["tags", "tag", "labels"]],
 ];
 
 /** "E-mail Address" -> "emailaddress" */
@@ -76,8 +79,9 @@ export function detectColumnTarget(header: string): DetectedTarget {
 /**
  * Suggested mapping for a header row: well-known headers become email / names,
  * everything else a custom field named after the header. Only the first email,
- * first-name, etc. column is used; a "Name" column is only split into first and
- * last name when there are no dedicated first/last name columns.
+ * first-name, etc. column is used (several columns may be tags); a "Name"
+ * column is only split into first and last name when there are no dedicated
+ * first/last name columns.
  */
 export function suggestMapping(headers: string[]): ColumnMapping[] {
   const detected = headers.map(detectColumnTarget);
@@ -89,7 +93,7 @@ export function suggestMapping(headers: string[]): ColumnMapping[] {
     let target: ColumnTarget = detected[i];
     if (target === "full_name" && hasSplitNames) target = "field";
     if (target !== "field") {
-      if (!taken.has(target)) {
+      if (target === "tags" || !taken.has(target)) {
         taken.add(target);
         return { target };
       }
@@ -150,6 +154,8 @@ export interface ImportContact {
   lastName?: string;
   /** Non-empty custom field values only: empty cells never erase data. */
   fields: Record<string, string>;
+  /** Normalised tags from the columns imported as "Tags" (cells are split on commas / semicolons). */
+  tags: string[];
 }
 
 export interface InvalidRow {
@@ -172,8 +178,9 @@ export interface MappedRows {
 
 /**
  * Turn parsed rows into contacts: validates and lower-cases emails, splits
- * full names, collects custom fields and merges rows that share an email
- * (later non-empty values win). Assumes `validateMapping` passed.
+ * full names, collects custom fields and tags, and merges rows that share an
+ * email (later non-empty values win, tags are combined). Assumes
+ * `validateMapping` passed.
  */
 export function mapRows(rows: string[][], mapping: ColumnMapping[]): MappedRows {
   const emailCol = mapping.findIndex((m) => m.target === "email");
@@ -197,7 +204,7 @@ export function mapRows(rows: string[][], mapping: ColumnMapping[]): MappedRows 
       return;
     }
 
-    const contact: ImportContact = { email: normalizeEmail(rawEmail), fields: {} };
+    const contact: ImportContact = { email: normalizeEmail(rawEmail), fields: {}, tags: [] };
     let fullName: { firstName?: string; lastName?: string } = {};
     mapping.forEach((m, col) => {
       const value = (cells[col] ?? "").trim();
@@ -211,6 +218,9 @@ export function mapRows(rows: string[][], mapping: ColumnMapping[]): MappedRows 
           break;
         case "full_name":
           fullName = splitFullName(value);
+          break;
+        case "tags":
+          for (const tag of parseTags(value)) if (!contact.tags.includes(tag)) contact.tags.push(tag);
           break;
         case "field":
           contact.fields[m.fieldKey!.trim()] = value;
@@ -229,6 +239,7 @@ export function mapRows(rows: string[][], mapping: ColumnMapping[]): MappedRows 
     earlier.firstName = contact.firstName ?? earlier.firstName;
     earlier.lastName = contact.lastName ?? earlier.lastName;
     Object.assign(earlier.fields, contact.fields);
+    for (const tag of contact.tags) if (!earlier.tags.includes(tag)) earlier.tags.push(tag);
   });
 
   return {

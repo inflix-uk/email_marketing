@@ -1,5 +1,5 @@
 /** Skeleton shown while a campaigns page loads. */
-export default function CampaignsLoading() {
+export function CampaignSkeleton() {
   return (
     <div className="animate-pulse" aria-busy="true" aria-label="Loading">
       <div className="mb-6 space-y-2">

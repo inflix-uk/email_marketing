@@ -12,6 +12,7 @@ import {
   type InvalidRow,
 } from "@/lib/contacts/import";
 import { ImportError, runImport, type ImportOutcome } from "@/lib/contacts/run-import";
+import { parseTags } from "@/lib/contacts/tags";
 
 export interface ImportSummary extends ImportOutcome {
   totalRows: number;
@@ -19,6 +20,10 @@ export interface ImportSummary extends ImportOutcome {
   invalid: InvalidRow[];
   duplicateCount: number;
   updateExisting: boolean;
+  /** Tags added to every contact in the file. */
+  tags: string[];
+  /** A column was imported as tags, or `tags` isn't empty. */
+  usedTags: boolean;
 }
 
 export interface ImportState {
@@ -48,6 +53,8 @@ const importSchema = z
     listId: z.string().trim(),
     newListName: z.string().trim().max(100, "Keep the list name under 100 characters."),
     updateExisting: z.boolean(),
+    /** "Add this tag to every imported contact" (several may be separated by commas). */
+    tags: z.string().max(500, "That's too many tags - add at most a few.").transform(parseTags),
   })
   .superRefine((v, ctx) => {
     if (v.listMode === "existing" && !v.listId) ctx.addIssue({ code: "custom", message: "Choose which list to add the contacts to." });
@@ -64,6 +71,7 @@ export async function importContactsAction(_prev: ImportState, formData: FormDat
     listId: String(formData.get("listId") ?? ""),
     newListName: String(formData.get("newListName") ?? ""),
     updateExisting: formData.get("updateExisting") === "on",
+    tags: String(formData.get("tags") ?? ""),
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   const input = parsed.data;
@@ -88,6 +96,7 @@ export async function importContactsAction(_prev: ImportState, formData: FormDat
       listId: input.listMode === "existing" ? input.listId : null,
       newListName: input.listMode === "new" ? input.newListName : null,
       updateExisting: input.updateExisting,
+      tags: input.tags,
     });
   } catch (err) {
     if (err instanceof ImportError) return { error: err.message };
@@ -109,6 +118,8 @@ export async function importContactsAction(_prev: ImportState, formData: FormDat
       invalid: mapped.invalid,
       duplicateCount: mapped.duplicateCount,
       updateExisting: input.updateExisting,
+      tags: input.tags,
+      usedTags: input.tags.length > 0 || input.mapping.some((m) => m.target === "tags"),
     },
   };
 }

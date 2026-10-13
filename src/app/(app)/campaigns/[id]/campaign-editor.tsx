@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageHeader, StatusBadge } from "@/components/ui/layout";
 import type { Campaign } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
+import { getSegmentOptions } from "@/lib/segments";
 import { countRecipients, getCampaignProblems } from "@/lib/sending";
 import { lintEmailHtml } from "@/lib/templates/lint";
 import { formatDateTime, formatNumber } from "@/lib/utils";
@@ -15,15 +16,19 @@ import { ReviewPanel } from "./review-panel";
 
 /** /campaigns/[id] for draft and scheduled campaigns. */
 export async function CampaignEditor({ campaign }: { campaign: Campaign }) {
-  const [session, lists, problems] = await Promise.all([
+  const [session, lists, segments, problems] = await Promise.all([
     requireSession(),
     getListsWithCounts(),
+    getSegmentOptions(),
     getCampaignProblems(campaign.id),
   ]);
-  // Ignore ids of lists deleted since the campaign was saved.
+  // Ignore ids of lists and segments deleted since the campaign was saved.
   const listIdSet = new Set(lists.map((l) => l.id));
+  const segmentIdSet = new Set(segments.map((s) => s.id));
   const selectedListIds = (campaign.listIds ?? []).filter((id) => listIdSet.has(id));
-  const recipients = selectedListIds.length ? await countRecipients(selectedListIds) : 0;
+  const selectedSegmentIds = (campaign.segmentIds ?? []).filter((id) => segmentIdSet.has(id));
+  const recipients =
+    selectedListIds.length + selectedSegmentIds.length ? await countRecipients(selectedListIds, selectedSegmentIds) : 0;
   const lintIssues = lintEmailHtml(campaign.html);
 
   return (
@@ -107,9 +112,19 @@ export async function CampaignEditor({ campaign }: { campaign: Campaign }) {
             fromEmail: campaign.fromEmail,
             replyTo: campaign.replyTo ?? "",
             html: campaign.html,
+            design: campaign.design ?? null,
+            abTest: campaign.abTest
+              ? {
+                  subjectB: campaign.abTest.subjectB,
+                  testPercent: campaign.abTest.testPercent,
+                  waitHours: campaign.abTest.waitHours,
+                }
+              : null,
           }}
           lists={lists}
+          segments={segments}
           selectedListIds={selectedListIds}
+          selectedSegmentIds={selectedSegmentIds}
           recipientCount={recipients}
         />
         <aside aria-label="Review and send" className="lg:col-start-3 lg:row-start-1">

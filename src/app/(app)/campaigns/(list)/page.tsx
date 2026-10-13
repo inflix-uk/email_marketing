@@ -6,10 +6,10 @@ import { collections } from "@/db";
 import type { CampaignStatus } from "@/db/schema";
 import { countRecipients, getCampaignsStats, type CampaignStats } from "@/lib/sending";
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
-import { FilterTabs } from "./_components/filter-tabs";
-import { LocalDateTime } from "./_components/local-time";
-import { Pagination } from "./_components/pagination";
-import { firstParam, isEditable, parsePage } from "./_lib/queries";
+import { FilterTabs } from "../_components/filter-tabs";
+import { LocalDateTime } from "../_components/local-time";
+import { Pagination } from "../_components/pagination";
+import { firstParam, isEditable, parsePage } from "../_lib/queries";
 
 export const metadata: Metadata = { title: "Campaigns" };
 
@@ -34,6 +34,7 @@ type Row = {
   updatedAt: Date;
   totalRecipients: number;
   listIds: string[];
+  segmentIds: string[];
 };
 
 export default async function CampaignsPage({
@@ -56,7 +57,7 @@ export default async function CampaignsPage({
   const header = (
     <PageHeader
       title="Campaigns"
-      description="Write an email once and send it to your lists, then track opens and clicks."
+      description="Write an email once and send it to your lists or segments, then track opens and clicks."
       actions={newButton}
     />
   );
@@ -86,6 +87,7 @@ export default async function CampaignsPage({
         updatedAt: 1,
         totalRecipients: 1,
         listIds: 1,
+        segmentIds: 1,
       },
     })
     .sort(tab.key === "scheduled" ? { scheduledAt: 1, _id: 1 } : { updatedAt: -1, _id: 1 })
@@ -103,15 +105,19 @@ export default async function CampaignsPage({
     updatedAt: d.updatedAt,
     totalRecipients: d.totalRecipients ?? 0,
     listIds: d.listIds ?? [],
+    segmentIds: d.segmentIds ?? [],
   }));
 
-  // Sent-ish campaigns report real numbers; drafts get an estimate from their lists.
+  // Sent-ish campaigns report real numbers; drafts get an estimate from their lists and segments.
   const reportIds = rows.filter((r) => !isEditable(r.status)).map((r) => r.id);
   const drafts = rows.filter((r) => isEditable(r.status));
   const [stats, estimates] = await Promise.all([
     reportIds.length ? getCampaignsStats(reportIds) : Promise.resolve(new Map<string, CampaignStats>()),
     Promise.all(
-      drafts.map(async (r) => [r.id, r.listIds.length ? await countRecipients(r.listIds) : 0] as const),
+      drafts.map(
+        async (r) =>
+          [r.id, r.listIds.length + r.segmentIds.length ? await countRecipients(r.listIds, r.segmentIds) : 0] as const,
+      ),
     ).then((entries) => new Map(entries)),
   ]);
 
@@ -197,7 +203,7 @@ function CampaignRow({ row, stats, estimate }: { row: Row; stats?: CampaignStats
       </Td>
       <Td className="text-right tabular-nums">
         {draft ? (
-          <span className="text-slate-500" title="Estimated from the selected lists">
+          <span className="text-slate-500" title="Estimated from the selected lists and segments">
             {formatNumber(estimate ?? 0)}
           </span>
         ) : (
@@ -253,7 +259,7 @@ const STEPS = [
   },
   {
     title: "Create a campaign",
-    text: "Choose lists, write your subject, send yourself a test, then send or schedule it.",
+    text: "Choose who gets it, write your subject, send yourself a test, then send or schedule it.",
     href: "/campaigns/new",
     cta: "New campaign",
   },

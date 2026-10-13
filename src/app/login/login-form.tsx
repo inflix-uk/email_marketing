@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 import { SubmitButton } from "@/components/ui/button";
-import { Alert, Field, Input } from "@/components/ui/form";
+import { Alert, Field, Input, Label } from "@/components/ui/form";
 import { login, type LoginState } from "./actions";
 
 export function LoginForm({ next }: { next: string }) {
@@ -13,11 +14,27 @@ export function LoginForm({ next }: { next: string }) {
       <input type="hidden" name="next" value={next} />
       {state.error ? <Alert tone="error">{state.error}</Alert> : null}
       <Field label="Email" htmlFor="email">
-        <Input id="email" name="email" type="email" autoComplete="email" required autoFocus />
+        {/* Keep the email after a failed attempt (React clears the form when the action finishes). */}
+        <Input
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          required
+          autoFocus
+          key={state.email ?? ""}
+          defaultValue={state.email ?? ""}
+        />
       </Field>
-      <Field label="Password" htmlFor="password">
+      <div className="space-y-1.5">
+        <div className="flex items-baseline justify-between">
+          <Label htmlFor="password">Password</Label>
+          <Link href="/forgot-password" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+            Forgot password?
+          </Link>
+        </div>
         <Input id="password" name="password" type="password" autoComplete="current-password" required />
-      </Field>
+      </div>
       <SubmitButton className="w-full" pendingText="Signing in...">
         Sign in
       </SubmitButton>

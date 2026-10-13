@@ -1,28 +1,45 @@
-// CONTRACT (stub written by the orchestrator - the automations agent replaces
-// the bodies; signatures must stay exactly as they are, other areas import them).
+// Automations: email series sent automatically after a trigger (welcome email,
+// onboarding drip). Public API used by the web app (forms, contacts, lists, the
+// REST API, the automation pages) and by the worker. Framework-agnostic: no
+// next/* imports, so the worker can run it under tsx.
+//
+//   await triggerAutomations({ type: "list_joined", listId, contactIds: [id] });
+//     Call AFTER the change is saved. Enrols subscribed contacts into the active
+//     automations with a matching trigger. Never throws. Only for individual
+//     actions (form sign-up, single contact add/edit, API) - NOT for bulk
+//     imports or pasted lists.
+//
+//   const sent = await processDueAutomations({ limit, signal });
+//     Called by the worker loop on every tick; sends the emails that are due.
 
-export type AutomationEvent =
-  | { type: "list_joined"; listId: string; contactIds: string[] }
-  | { type: "form_submitted"; formId: string; contactIds: string[] }
-  | { type: "tag_added"; tag: string; contactIds: string[] };
-
-/**
- * Enrol contacts into the active automations whose trigger matches this event.
- * Call it AFTER the change is saved. Never throws (logs instead) - a broken
- * automation must not fail a sign-up or a contact edit.
- * Only for individual actions (form sign-up, single contact add/edit, API) -
- * NOT for bulk imports or pasted lists.
- */
-export async function triggerAutomations(event: AutomationEvent): Promise<void> {
-  void event;
-}
-
-/**
- * Send the automation emails that are due. Called by the worker loop on every
- * tick. Returns the number of emails sent. Must respect the daily send limit
- * and stop promptly when `signal` aborts.
- */
-export async function processDueAutomations(opts?: { limit?: number; signal?: AbortSignal }): Promise<number> {
-  void opts;
-  return 0;
-}
+export { triggerAutomations, enrollForEvent } from "./enroll";
+export { processDueAutomations, ENROLLMENT_LEASE_MS } from "./process";
+export {
+  getEnrollmentCounts,
+  getWaitingByStep,
+  getStepStats,
+  getAutomationsStats,
+  emptyEnrollmentCounts,
+  type EnrollmentCounts,
+} from "./stats";
+export {
+  DELAY_UNITS,
+  MAX_DELAY_MINUTES,
+  MAX_STEPS,
+  MAX_STEP_ATTEMPTS,
+  delayToMinutes,
+  splitDelay,
+  formatDelay,
+  describeStepTiming,
+  runAtAfter,
+  normalizeTag,
+  matchesTrigger,
+  describeTrigger,
+  firstRunAt,
+  advanceAfterStep,
+  getActivationProblems,
+  hasContent,
+  type AutomationEvent,
+  type DelayUnit,
+  type Advance,
+} from "./logic";

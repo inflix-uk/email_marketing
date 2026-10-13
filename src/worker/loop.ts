@@ -1,11 +1,14 @@
 import { collections, DatabaseNotConfiguredError } from "@/db";
+import { processDueAutomations } from "@/lib/automations";
 import { getSettings, isDevMailer, type AppSettings } from "@/lib/settings";
 import {
   finalizeCampaigns,
   getCampaignsStats,
+  pauseCampaignIfBouncing,
   processBatch,
   recoverStuckSends,
   startDueScheduledCampaigns,
+  utcDayKey,
 } from "@/lib/sending";
 
 const IDLE_POLL_MS = 2_000;
@@ -13,14 +16,18 @@ const ERROR_BACKOFF_MS = 5_000;
 const CONFIG_BACKOFF_MS = 60_000;
 const SETUP_RETRY_MS = 10_000;
 const RECOVERY_INTERVAL_MS = 60_000;
+/** Poll interval once today's send limit is used up (nothing can go out until 00:00 UTC or a settings change). */
+const LIMIT_POLL_MS = 30_000;
 
 export interface WorkerOptions {
   /** Abort to stop gracefully: in-flight emails finish, then the loop exits. */
   signal: AbortSignal;
   /** Exit as soon as there is nothing due (cron-style runs, tests). */
   once?: boolean;
-  /** Only touch these campaigns (tests). */
+  /** Only touch these campaigns (tests). Also turns automation emails off unless `automations` is true. */
   campaignIds?: string[];
+  /** Send due automation emails on every tick. Default: on, except in campaign-scoped runs. */
+  automations?: boolean;
   log?: (line: string) => void;
 }
 
@@ -46,7 +53,8 @@ export function describeMailer(settings: AppSettings): string {
 }
 
 function describeSettings(settings: AppSettings): string {
-  return `mode: ${describeMailer(settings)}, rate ${settings.sendRatePerSecond}/s`;
+  const limit = settings.dailySendLimit > 0 ? `, daily limit ${settings.dailySendLimit}` : "";
+  return `mode: ${describeMailer(settings)}, rate ${settings.sendRatePerSecond}/s${limit}`;
 }
 
 /** The database isn't set up yet, or can't be reached. */
@@ -94,6 +102,7 @@ export async function runWorker(opts: WorkerOptions): Promise<void> {
   const { signal } = opts;
   const log = opts.log ?? ((line: string) => console.log(line));
   const scope = opts.campaignIds ? { campaignIds: opts.campaignIds } : {};
+  const automations = opts.automations ?? !opts.campaignIds;
 
   log("[worker] starting");
   if (!(await waitForDatabase(opts, log))) {
@@ -106,6 +115,8 @@ export async function runWorker(opts: WorkerOptions): Promise<void> {
 
   let lastRecovery = 0;
   let waitingForDb = false;
+  /** UTC day for which "daily limit reached" was already logged. */
+  let limitLoggedFor = "";
 
   while (!signal.aborted) {
     let busy = false;
@@ -140,14 +151,34 @@ export async function runWorker(opts: WorkerOptions): Promise<void> {
       }
 
       const batch = await processBatch({ ...scope, shouldStop: () => signal.aborted });
+      for (const ab of batch.abDecided) {
+        log(`[worker] campaign ${short(ab.campaignId)}: A/B test decided - subject ${ab.winner} wins, sending it to the rest`);
+      }
       if (batch.campaignIds.length > 0) await logProgress(batch.campaignIds, log);
+      if (batch.dailyLimitReached && limitLoggedFor !== utcDayKey()) {
+        limitLoggedFor = utcDayKey();
+        const { dailySendLimit } = await getSettings();
+        log(`[worker] daily send limit reached (${dailySendLimit}) - the queue continues after 00:00 UTC`);
+      }
 
       const finished = await finalizeCampaigns(scope);
       for (const c of finished) await logFinished(c, log);
 
+      // Automation emails (welcome series, drips). Their own module; a failure
+      // there must never stop campaign sending.
+      let automated = 0;
+      if (automations && !signal.aborted) {
+        try {
+          automated = await processDueAutomations({ signal });
+        } catch (err) {
+          console.error("[worker] automation error (continuing):", err);
+        }
+      }
+
       // Only real progress skips the idle wait, so a failing database can't cause a hot loop.
-      const progressed = batch.sent + batch.failed + batch.retried + batch.skipped;
+      const progressed = batch.sent + batch.failed + batch.retried + batch.skipped + (automated > 0 ? automated : 0);
       busy = progressed > 0 || scheduled.started.length > 0 || finished.length > 0;
+      if (batch.dailyLimitReached && !busy) pause = LIMIT_POLL_MS;
       if (batch.errors > 0) {
         console.error("[worker] database error while sending - retrying in 5s");
         busy = false;
@@ -190,11 +221,18 @@ async function logProgress(ids: string[], log: (line: string) => void): Promise<
   for (const c of rows) {
     const s = stats.get(c._id);
     if (!s) continue;
-    const extra = [s.failed && `${s.failed} failed`, s.skipped && `${s.skipped} skipped`].filter(Boolean);
+    const extra = [
+      s.failed && `${s.failed} failed`,
+      s.skipped && `${s.skipped} skipped`,
+      s.bounced && `${s.bounced} bounced`,
+    ].filter(Boolean);
     log(
       `[worker] campaign "${c.name}" (${short(c._id)}): sent ${s.sent}/${c.totalRecipients || s.total}` +
         (extra.length ? ` (${extra.join(", ")})` : ""),
     );
+    // Too many hard bounces: stop before the sender reputation suffers.
+    const paused = await pauseCampaignIfBouncing(c._id, s);
+    if (paused) log(`[worker] campaign "${c.name}" (${short(c._id)}): PAUSED - ${paused.reason}`);
   }
 }
 

@@ -6,6 +6,11 @@
 //     Code editor + live preview + lint checks; submits its HTML through a
 //     hidden <input name="html"> so it works inside any <form>.
 //
+//   <EmailEditor name="html" defaultValue={html} designName="design" defaultDesign={design} />
+//     Adds the visual (block) editor. Also submits the design JSON through a
+//     hidden <input name="design"> - "" when the email is hand-written HTML.
+//     On the server: parseDesign() / renderDesign() from "@/lib/email-design".
+//
 //   <EmailPreview html={html} width="mobile" height={600} />
 //     Sandboxed, read-only preview with merge tags filled from SAMPLE_CONTACT.
 //

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export type PreviewWidth = "desktop" | "mobile";
@@ -29,14 +29,34 @@ export function PreviewFrame({
   height = "auto",
   title = "Email preview",
   className,
+  desktopMinWidth,
 }: {
   srcDoc: string;
   width?: PreviewWidth;
   height?: PreviewHeight;
   title?: string;
   className?: string;
+  /**
+   * With height "fill" and the desktop width: when the pane is narrower than
+   * this many px, lay the email out at this width and scale it down to fit,
+   * so a narrow pane still shows the desktop layout (not the mobile one).
+   */
+  desktopMinWidth?: number;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
+  const [paneWidth, setPaneWidth] = useState<number | null>(null);
+  const fit = height === "fill" && width === "desktop" && desktopMinWidth ? desktopMinWidth : null;
+
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (!fit || !pane) return;
+    const observer = new ResizeObserver(() => setPaneWidth(pane.clientWidth));
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [fit]);
+
+  const scale = fit && paneWidth && paneWidth < fit ? paneWidth / fit : 1;
   // Scroll position survives re-renders of the document while editing.
   const scrollTop = useRef(0);
 
@@ -118,16 +138,28 @@ export function PreviewFrame({
         height === "fill" && "h-full",
         height === "auto" && "h-[480px]",
       )}
-      style={{
-        width: mobile ? MOBILE_WIDTH : undefined,
-        height: typeof height === "number" ? height : undefined,
-      }}
+      style={
+        scale < 1 && fit
+          ? { width: fit, height: `${100 / scale}%`, transform: `scale(${scale})`, transformOrigin: "top left" }
+          : {
+              width: mobile ? MOBILE_WIDTH : undefined,
+              height: typeof height === "number" ? height : undefined,
+            }
+      }
     />
   );
 
   if (height === "fill") {
     return (
-      <div className={cn("absolute inset-0 flex justify-center overflow-hidden", mobile && "p-4", className)}>
+      <div
+        ref={paneRef}
+        className={cn(
+          "absolute inset-0 overflow-hidden",
+          scale < 1 ? "block" : "flex justify-center",
+          mobile && "p-4",
+          className,
+        )}
+      >
         {frame}
       </div>
     );

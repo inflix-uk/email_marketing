@@ -57,6 +57,21 @@ export const PROVIDERS: ProviderPreset[] = [
   },
 ];
 
+/** Providers with a bounce/complaint webhook parser: /api/webhooks/<id> (see src/lib/sending/webhooks.ts). */
+export const WEBHOOK_PROVIDERS: { id: string; label: string; hint: string }[] = [
+  { id: "ses", label: "Amazon SES", hint: "Subscribe this URL (HTTPS) to the SNS topic for your SES bounce and complaint notifications." },
+  { id: "resend", label: "Resend", hint: "Add it under Webhooks for the email.bounced and email.complained events." },
+  { id: "brevo", label: "Brevo", hint: "Add it as a transactional webhook for the hard bounce, blocked and spam events." },
+  { id: "mailgun", label: "Mailgun", hint: "Add it for the Permanent Failure and Spam Complaints webhooks." },
+  { id: "generic", label: "Other", hint: 'POST JSON like { "type": "bounce" or "complaint", "email": "..." } to it.' },
+];
+
+/** The webhook provider matching a saved SMTP host ("generic" when none match). */
+export function detectWebhookProvider(host: string): string {
+  const id = detectProvider(host);
+  return WEBHOOK_PROVIDERS.some((p) => p.id === id) ? id : "generic";
+}
+
 /** Which preset a saved host belongs to ("custom" when none match). */
 export function detectProvider(host: string): string {
   const h = host.trim().toLowerCase();

@@ -57,6 +57,29 @@ export async function existingListIds(ids: string[]): Promise<string[]> {
   return unique.filter((id) => found.has(id));
 }
 
+/** The ids (in the given order) that still belong to an existing segment. */
+export async function existingSegmentIds(ids: string[]): Promise<string[]> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return [];
+  const { segments } = await collections();
+  const found = new Set(
+    (await segments.find({ _id: { $in: unique } }, { projection: { _id: 1 } }).toArray()).map((s) => s._id),
+  );
+  return unique.filter((id) => found.has(id));
+}
+
+/** Names of the given segments (deleted ones are skipped), alphabetically. */
+export async function getSegmentNames(segmentIds: string[]): Promise<{ id: string; name: string }[]> {
+  if (segmentIds.length === 0) return [];
+  const { segments } = await collections();
+  const rows = await segments
+    .find({ _id: { $in: [...new Set(segmentIds)] } }, { projection: { name: 1 } })
+    .collation(NAME_COLLATION)
+    .sort({ name: 1 })
+    .toArray();
+  return rows.map((s) => ({ id: s._id, name: s.name }));
+}
+
 /** Names of the given lists (deleted ones are skipped), alphabetically. */
 export async function getListNames(listIds: string[]): Promise<{ id: string; name: string }[]> {
   if (listIds.length === 0) return [];
@@ -71,7 +94,7 @@ export async function getListNames(listIds: string[]): Promise<{ id: string; nam
 
 // --- Report: recipients table -----------------------------------------------
 
-export const RECIPIENT_FILTERS = ["all", "opened", "clicked", "unsubscribed", "failed"] as const;
+export const RECIPIENT_FILTERS = ["all", "opened", "clicked", "unsubscribed", "bounced", "failed"] as const;
 export type RecipientFilter = (typeof RECIPIENT_FILTERS)[number];
 
 export const RECIPIENTS_PAGE_SIZE = 50;
@@ -84,6 +107,8 @@ function recipientFilterQuery(filter: RecipientFilter): Filter<SendDoc> {
       return { clickedAt: { $ne: null } };
     case "unsubscribed":
       return { unsubscribedAt: { $ne: null } };
+    case "bounced":
+      return { bouncedAt: { $ne: null } };
     case "failed":
       return { status: { $in: ["failed", "skipped"] } };
     default:
@@ -101,6 +126,8 @@ function recipientSort(filter: RecipientFilter): Sort {
       return { clickedAt: -1, _id: 1 };
     case "unsubscribed":
       return { unsubscribedAt: -1, _id: 1 };
+    case "bounced":
+      return { bouncedAt: -1, _id: 1 };
     case "failed":
       return { updatedAt: -1, _id: 1 };
     default:
@@ -118,6 +145,9 @@ export interface RecipientRow {
   openedAt: Date | null;
   clickedAt: Date | null;
   unsubscribedAt: Date | null;
+  bouncedAt: Date | null;
+  complainedAt: Date | null;
+  variant: "A" | "B" | null;
   openCount: number;
   clickCount: number;
 }
@@ -139,6 +169,9 @@ export async function getRecipientsPage(campaignId: string, filter: RecipientFil
         openedAt: 1,
         clickedAt: 1,
         unsubscribedAt: 1,
+        bouncedAt: 1,
+        complainedAt: 1,
+        variant: 1,
         openCount: 1,
         clickCount: 1,
       },
@@ -157,6 +190,9 @@ export async function getRecipientsPage(campaignId: string, filter: RecipientFil
     openedAt: d.openedAt ?? null,
     clickedAt: d.clickedAt ?? null,
     unsubscribedAt: d.unsubscribedAt ?? null,
+    bouncedAt: d.bouncedAt ?? null,
+    complainedAt: d.complainedAt ?? null,
+    variant: d.variant ?? null,
     openCount: d.openCount ?? 0,
     clickCount: d.clickCount ?? 0,
   }));

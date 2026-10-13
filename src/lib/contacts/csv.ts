@@ -1,12 +1,14 @@
 import Papa from "papaparse";
 import type { Contact } from "@/db/schema";
 
-export type ExportContact = Pick<Contact, "email" | "firstName" | "lastName" | "status" | "createdAt" | "fields">;
+export type ExportContact = Pick<Contact, "email" | "firstName" | "lastName" | "status" | "createdAt" | "fields"> & {
+  tags?: string[] | null;
+};
 
 /** Byte-order mark: tells Excel the file is UTF-8. */
 const BOM = String.fromCharCode(0xfeff);
 
-const BASE_COLUMNS = ["email", "first_name", "last_name", "status", "created_at"] as const;
+const BASE_COLUMNS = ["email", "first_name", "last_name", "status", "created_at", "tags"] as const;
 
 const CSV_OPTIONS = { escapeFormulae: true, newline: "\r\n" } as const;
 
@@ -38,6 +40,8 @@ export function csvRows(contacts: ExportContact[], fieldKeys: string[]): string 
     c.lastName ?? "",
     c.status,
     c.createdAt.toISOString(),
+    // Comma-separated, so the column can be imported again as "Tags".
+    (c.tags ?? []).join(", "),
     ...fieldKeys.map((k) => c.fields?.[k] ?? ""),
   ]);
   return `${Papa.unparse(rows, CSV_OPTIONS)}\r\n`;

@@ -16,6 +16,8 @@ export interface EditableTemplate {
   subject: string | null;
   previewText: string | null;
   html: string;
+  /** Visual-editor design JSON; null = hand-written HTML. */
+  design: string | null;
 }
 
 export function TemplateForm({
@@ -35,6 +37,7 @@ export function TemplateForm({
   const [subject, setSubject] = useState(template.subject ?? "");
   const [previewText, setPreviewText] = useState(template.previewText ?? "");
   const [html, setHtml] = useState(template.html);
+  const [design, setDesign] = useState(template.design ?? "");
   const [testTo, setTestTo] = useState(testRecipient);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -42,7 +45,8 @@ export function TemplateForm({
     name.trim() !== template.name ||
     subject.trim() !== (template.subject ?? "") ||
     previewText.trim() !== (template.previewText ?? "") ||
-    html !== template.html;
+    html !== template.html ||
+    design !== (template.design ?? "");
 
   // Ctrl/Cmd+S saves.
   useEffect(() => {
@@ -125,6 +129,9 @@ export function TemplateForm({
             defaultValue={template.html}
             previewText={previewText}
             onChange={setHtml}
+            designName="design"
+            defaultDesign={template.design}
+            onDesignChange={setDesign}
             minHeight={560}
           />
           {errors.html ? <p className="text-xs text-red-600">{errors.html[0]}</p> : null}

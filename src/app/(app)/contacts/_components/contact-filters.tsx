@@ -5,22 +5,15 @@ import { useTransition, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/form";
 import { CONTACT_STATUSES } from "@/db/schema";
-import type { ContactFilters } from "@/lib/contacts/filters";
-import type { ListRef } from "@/lib/contacts/queries";
-
-const STATUS_LABELS: Record<(typeof CONTACT_STATUSES)[number], string> = {
-  subscribed: "Subscribed",
-  unsubscribed: "Unsubscribed",
-  bounced: "Bounced",
-  complained: "Complained",
-};
+import { CONTACT_STATUS_LABELS, hasFilters, type ContactFilters } from "@/lib/contacts/filters";
+import type { ListRef, TagOption } from "@/lib/contacts/queries";
 
 /**
- * Search + status + list filters for the contacts table. Selects apply
+ * Search + status + list + tag filters for the contacts table. Selects apply
  * immediately; the search applies on Enter. Works as a plain GET form without JS.
  * Render it with a `key` derived from the filters so it resets on navigation.
  */
-export function ContactFiltersBar({ filters, lists }: { filters: ContactFilters; lists: ListRef[] }) {
+export function ContactFiltersBar({ filters, lists, tags }: { filters: ContactFilters; lists: ListRef[]; tags: TagOption[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -38,7 +31,10 @@ export function ContactFiltersBar({ filters, lists }: { filters: ContactFilters;
     apply(e.currentTarget);
   }
 
-  const active = Boolean(filters.q || filters.status || filters.listId);
+  const active = hasFilters(filters);
+  // Keep the current tag selectable even when no contact has it any more.
+  const tagNames = tags.map((t) => t.tag);
+  if (filters.tag && !tagNames.includes(filters.tag)) tagNames.unshift(filters.tag);
 
   return (
     <form
@@ -46,7 +42,7 @@ export function ContactFiltersBar({ filters, lists }: { filters: ContactFilters;
       onSubmit={onSubmit}
       role="search"
       aria-busy={pending}
-      className="flex flex-col gap-2 sm:flex-row sm:items-center"
+      className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
     >
       <label htmlFor="contact-search" className="sr-only">
         Search contacts
@@ -72,7 +68,7 @@ export function ContactFiltersBar({ filters, lists }: { filters: ContactFilters;
         <option value="">All statuses</option>
         {CONTACT_STATUSES.map((s) => (
           <option key={s} value={s}>
-            {STATUS_LABELS[s]}
+            {CONTACT_STATUS_LABELS[s]}
           </option>
         ))}
       </Select>
@@ -93,6 +89,27 @@ export function ContactFiltersBar({ filters, lists }: { filters: ContactFilters;
           </option>
         ))}
       </Select>
+      {tagNames.length > 0 ? (
+        <>
+          <label htmlFor="contact-tag" className="sr-only">
+            Tag
+          </label>
+          <Select
+            id="contact-tag"
+            name="tag"
+            defaultValue={filters.tag ?? ""}
+            onChange={(e) => apply(e.currentTarget.form!)}
+            className="sm:w-44"
+          >
+            <option value="">All tags</option>
+            {tagNames.map((tag) => (
+              <option key={tag} value={tag}>
+                {tag}
+              </option>
+            ))}
+          </Select>
+        </>
+      ) : null}
       <div className="flex items-center gap-2">
         <Button type="submit" variant="secondary" disabled={pending}>
           {pending ? "Searching..." : "Search"}

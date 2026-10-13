@@ -5,6 +5,7 @@ import { bulkOutcome, chunk, forEachConcurrent } from "./batch";
 import type { ImportContact } from "./import";
 import { addToListByEmail, createList } from "./mutations";
 import { findContactsByEmail, getList, type ExistingContact } from "./queries";
+import { missingTags, uniqueTags } from "./tags";
 
 // Database side of the CSV import. Takes contacts already produced by
 // `mapRows` (validated, lower-cased, de-duplicated) and writes them in chunks
@@ -12,10 +13,14 @@ import { findContactsByEmail, getList, type ExistingContact } from "./queries";
 // membership updateMany per chunk - no per-row round trips. Every write is
 // idempotent, so re-running an import that failed half-way is safe.
 //
-// Rules: new contacts are created as subscribed with source "import";
-// existing contacts keep their status and source (an import never
-// re-subscribes anyone); their names/fields are only touched when
-// `updateExisting` is on, and empty cells never erase existing data.
+// Rules: new contacts are created as subscribed with source "import" (and an
+// "import" consent record); existing contacts keep their status and source
+// (an import never re-subscribes anyone - suppressed addresses stay
+// unsubscribed); their names/fields are only touched when `updateExisting`
+// is on, and empty cells never erase existing data. Tags (from a "Tags"
+// column and the "tag everyone" option) are merged with $addToSet for new and
+// existing contacts alike - an import never removes a tag. Imports never
+// trigger automations.
 
 export class ImportError extends Error {}
 
@@ -26,6 +31,8 @@ export interface ImportOptions {
   newListName?: string | null;
   /** Fill in / overwrite names and custom fields of contacts that already exist. */
   updateExisting: boolean;
+  /** Tags added to every contact in the file. */
+  tags?: string[];
 }
 
 export interface ImportOutcome {
@@ -38,6 +45,8 @@ export interface ImportOutcome {
   notSubscribed: number;
   /** New memberships in the target list. */
   addedToList: number;
+  /** Existing contacts that received at least one new tag. */
+  tagged: number;
   list: { id: string; name: string; created: boolean } | null;
 }
 
@@ -55,8 +64,18 @@ export function hasChanges(current: Pick<ExistingContact, "firstName" | "lastNam
   return Object.entries(incoming.fields).some(([key, value]) => current.fields?.[key] !== value);
 }
 
+/** Tags a row ends up with: its own plus the ones added to everyone. */
+export function rowTags(row: Pick<ImportContact, "tags">, extraTags: readonly string[] = []): string[] {
+  return uniqueTags([...(row.tags ?? []), ...extraTags]);
+}
+
 /** The document a new contact from the file is created as. */
-export function newImportedContact(row: ImportContact, listId: string | null, now: Date): ContactDoc {
+export function newImportedContact(
+  row: ImportContact,
+  listId: string | null,
+  now: Date,
+  extraTags: readonly string[] = [],
+): ContactDoc {
   return {
     _id: newId(),
     email: row.email,
@@ -67,6 +86,8 @@ export function newImportedContact(row: ImportContact, listId: string | null, no
     source: "import",
     listIds: listId ? [listId] : [],
     unsubscribedAt: null,
+    tags: rowTags(row, extraTags),
+    consent: { source: "import", at: now },
     createdAt: now,
     updatedAt: now,
   };
@@ -104,11 +125,12 @@ export async function runImport(rows: ImportContact[], opts: ImportOptions): Pro
     list = { id, name: opts.newListName, created: true };
   }
 
-  const counts: Counts = { created: 0, updated: 0, existing: 0, notSubscribed: 0, addedToList: 0 };
+  const counts: Counts = { created: 0, updated: 0, existing: 0, notSubscribed: 0, addedToList: 0, tagged: 0 };
   const now = new Date();
+  const extraTags = uniqueTags(opts.tags ?? []);
   // Rows are unique by email, so chunks are independent and can overlap.
   await forEachConcurrent(chunk(rows), CONCURRENT_CHUNKS, (part) =>
-    importChunk(part, list?.id ?? null, opts.updateExisting, now, counts),
+    importChunk(part, list?.id ?? null, opts.updateExisting, extraTags, now, counts),
   );
   return { ...counts, list };
 }
@@ -117,6 +139,7 @@ async function importChunk(
   rows: ImportContact[],
   listId: string | null,
   updateExisting: boolean,
+  extraTags: string[],
   now: Date,
   counts: Counts,
 ): Promise<void> {
@@ -130,23 +153,32 @@ async function importChunk(
     const ops: AnyBulkWriteOperation<ContactDoc>[] = [];
     /** The row behind each op, to retry lost insert races. */
     const opRows: ImportContact[] = [];
+    /** New tags for existing contacts: written separately so `updated` keeps meaning "details changed". */
+    const tagOps: AnyBulkWriteOperation<ContactDoc>[] = [];
 
     for (const row of pending) {
       const current = existing.get(row.email);
       if (!current) {
-        ops.push({ insertOne: { document: newImportedContact(row, listId, now) } });
+        ops.push({ insertOne: { document: newImportedContact(row, listId, now, extraTags) } });
         opRows.push(row);
         continue;
       }
       counts.existing++;
       if (current.status !== "subscribed") counts.notSubscribed++;
       existingEmails.push(row.email);
+      const newTags = missingTags(current.tags, rowTags(row, extraTags));
+      if (newTags.length > 0) {
+        tagOps.push({
+          updateOne: { filter: { _id: current.id }, update: { $addToSet: { tags: { $each: newTags } }, $set: { updatedAt: now } } },
+        });
+      }
       const $set = updateExisting ? importUpdateSet(current, row, now) : null;
       if ($set) {
         ops.push({ updateOne: { filter: { _id: current.id }, update: { $set } } });
         opRows.push(row);
       }
     }
+    if (tagOps.length > 0) counts.tagged += (await contacts.bulkWrite(tagOps, { ordered: false })).modifiedCount;
     if (ops.length === 0) break;
 
     const result = await bulkOutcome(() => contacts.bulkWrite(ops, { ordered: false }));

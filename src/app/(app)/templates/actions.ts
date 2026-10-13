@@ -6,12 +6,14 @@ import { z } from "zod";
 import { collections } from "@/db";
 import { newId, type TemplateDoc } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
+import { parseDesign, renderDesign, serializeDesign } from "@/lib/email-design";
 import { findStarter } from "@/lib/templates/starters";
 
 const MAX_NAME = 120;
 const MAX_SUBJECT = 200;
 const MAX_PREVIEW_TEXT = 200;
 const MAX_HTML_CHARS = 500_000;
+const MAX_DESIGN_CHARS = 500_000;
 
 const nameSchema = z
   .string()
@@ -30,7 +32,10 @@ const optionalText = (max: number, label: string) =>
 const htmlSchema = z
   .string()
   .refine((value) => value.trim().length > 0, "The email HTML can't be empty.")
-  .refine((value) => value.length <= MAX_HTML_CHARS, "The HTML is too large (max 500 KB).");
+  .refine((value) => value.length <= MAX_HTML_CHARS, "The HTML is too large (max 500 KB).")
+  // Form posts turn line breaks into CRLF; store what the editor shows (LF),
+  // so the saved HTML compares equal to the editor content afterwards.
+  .transform((value) => value.replace(/\r\n?/g, "\n"));
 
 function text(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -71,6 +76,8 @@ export async function createTemplate(_prev: CreateTemplateState, formData: FormD
     subject: starter.subject || null,
     previewText: starter.previewText || null,
     html: starter.html,
+    // Starter designs open in the visual editor; "Blank (HTML)" has no design.
+    design: starter.design,
     createdAt: now,
     updatedAt: now,
   };
@@ -85,7 +92,7 @@ export async function createTemplate(_prev: CreateTemplateState, formData: FormD
 // Save
 // ---------------------------------------------------------------------------
 
-export type TemplateField = "name" | "subject" | "previewText" | "html";
+export type TemplateField = "name" | "subject" | "previewText" | "html" | "design";
 
 export interface SaveTemplateState {
   ok?: boolean;
@@ -99,6 +106,8 @@ const saveSchema = z.object({
   subject: optionalText(MAX_SUBJECT, "The subject"),
   previewText: optionalText(MAX_PREVIEW_TEXT, "Preview text"),
   html: htmlSchema,
+  /** Design JSON from the visual editor; "" when the HTML was written by hand. */
+  design: z.string().max(MAX_DESIGN_CHARS, "The design is too large."),
 });
 
 export async function saveTemplate(_prev: SaveTemplateState, formData: FormData): Promise<SaveTemplateState> {
@@ -109,14 +118,37 @@ export async function saveTemplate(_prev: SaveTemplateState, formData: FormData)
     subject: text(formData, "subject"),
     previewText: text(formData, "previewText"),
     html: text(formData, "html"),
+    design: text(formData, "design"),
   });
   if (!parsed.success) {
     return { error: "Please fix the highlighted fields.", fieldErrors: z.flattenError(parsed.error).fieldErrors };
   }
 
   const { id, ...values } = parsed.data;
+  let html = values.html;
+  let design: string | null = null;
+  if (values.design.trim()) {
+    // Visual mode: the design is the source of truth. Store it in canonical
+    // form and regenerate the HTML from it, so the two can never drift apart.
+    const parsedDesign = parseDesign(values.design);
+    if (!parsedDesign) {
+      return {
+        error: "The visual design couldn't be read, so nothing was saved. Reload the page and try again.",
+        fieldErrors: { design: ["The visual design is not valid."] },
+      };
+    }
+    design = serializeDesign(parsedDesign);
+    html = renderDesign(parsedDesign);
+    if (html.length > MAX_HTML_CHARS) {
+      return { error: "This email is too large (max 500 KB). Remove some blocks and try again." };
+    }
+  }
+
   const { templates } = await collections();
-  const result = await templates.updateOne({ _id: id }, { $set: { ...values, updatedAt: new Date() } });
+  const result = await templates.updateOne(
+    { _id: id },
+    { $set: { ...values, html, design, updatedAt: new Date() } },
+  );
   if (result.matchedCount === 0) {
     return { error: "This template no longer exists - it may have been deleted." };
   }
@@ -144,6 +176,7 @@ export async function duplicateTemplate(formData: FormData): Promise<void> {
     subject: original.subject,
     previewText: original.previewText,
     html: original.html,
+    design: original.design ?? null,
     createdAt: now,
     updatedAt: now,
   };

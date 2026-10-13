@@ -5,6 +5,7 @@ import type { DashboardData } from "./data";
 
 const ROWS = [
   { key: "subscribed", label: "Subscribed", bar: "bg-emerald-500" },
+  { key: "pending", label: "Pending confirmation", bar: "bg-amber-400" },
   { key: "unsubscribed", label: "Unsubscribed", bar: "bg-slate-400" },
   { key: "bounced", label: "Bounced", bar: "bg-red-500" },
   { key: "complained", label: "Marked as spam", bar: "bg-red-700" },

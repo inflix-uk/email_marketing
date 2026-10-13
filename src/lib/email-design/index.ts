@@ -1,0 +1,80 @@
+// Visual email designs: the JSON model behind the visual editor and the
+// renderer that turns it into email HTML. Pure and client-safe (no DB, no
+// Node APIs), so the same code runs in the editor, in server actions and in
+// the worker.
+//
+//   const design = parseDesign(template.design);      // null = hand-written HTML
+//   const html = design ? renderDesign(design) : template.html;
+//   const json = serializeDesign(design);             // canonical string to store
+
+export {
+  ADDABLE_BLOCK_TYPES,
+  ALIGNMENTS,
+  BLANK_DESIGN,
+  BLOCK_LABELS,
+  COLUMN_CHILD_TYPES,
+  CONTENT_WIDTH,
+  DEFAULT_FOOTER_TEXT,
+  DEFAULT_STYLES,
+  DESIGN_VERSION,
+  FONT_FAMILIES,
+  FONT_FAMILY_KEYS,
+  IMAGE_WIDTH,
+  MAX_BLOCKS,
+  MAX_COLUMN_BLOCKS,
+  SPACER_HEIGHT,
+  TEXT_SIZES,
+  createBlock,
+  createFooter,
+  isHexColor,
+  normalizeHexColor,
+  normalizeDesign,
+  parseDesign,
+  serializeDesign,
+  toDesign,
+  type AddableBlockType,
+  type Align,
+  type Block,
+  type BlockType,
+  type ButtonBlock,
+  type ColumnChild,
+  type ColumnChildType,
+  type ColumnsBlock,
+  type DesignStyles,
+  type DividerBlock,
+  type EmailDesign,
+  type FontFamilyKey,
+  type FooterBlock,
+  type HeadingBlock,
+  type ImageBlock,
+  type SpacerBlock,
+  type TextBlock,
+  type TextSize,
+} from "./schema";
+export { renderDesign, type RenderOptions } from "./render";
+export { escapeText, sanitizeImageUrl, sanitizeLinkUrl } from "./rich-text";
+export {
+  addBlock,
+  addColumnChild,
+  canAddBlock,
+  canAddColumnChild,
+  canDeleteBlock,
+  canMoveBlock,
+  collectIds,
+  deleteBlock,
+  deleteColumnChild,
+  dropIndex,
+  duplicateBlock,
+  editorReducer,
+  findBlock,
+  moveBlock,
+  moveBlockTo,
+  moveColumnChild,
+  newBlockId,
+  replaceBlock,
+  replaceColumnChild,
+  updateStyles,
+  type ColumnIndex,
+  type EditorAction,
+  type EditorState,
+} from "./edit";

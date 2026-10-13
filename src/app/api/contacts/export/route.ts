@@ -8,8 +8,8 @@ import { exportContactsCursor, exportFieldKeys, getList } from "@/lib/contacts/q
 const BATCH_SIZE = 1000;
 
 /**
- * GET /api/contacts/export?q=&status=&list= - download the contacts matching
- * the same filters as the contacts table, as CSV. Streamed from a cursor in
+ * GET /api/contacts/export?q=&status=&list=&tag= - download the contacts
+ * matching the same filters as the contacts table, as CSV (with a tags column). Streamed from a cursor in
  * batches, so large exports never sit in memory as a whole.
  */
 export async function GET(request: NextRequest) {

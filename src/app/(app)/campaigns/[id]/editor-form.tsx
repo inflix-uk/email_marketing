@@ -7,8 +7,9 @@ import { Alert, Field, Input } from "@/components/ui/form";
 import { Card, CardBody, CardHeader } from "@/components/ui/layout";
 import { renderMergeTags, SAMPLE_CONTACT } from "@/lib/render";
 import { saveCampaign, type SaveState } from "../actions";
+import { AB_TEST_DEFAULTS, AB_TEST_LIMITS } from "../_lib/ab-test";
 import type { ListOption } from "../_lib/queries";
-import { AudiencePicker } from "./audience-picker";
+import { AudiencePicker, type SegmentOption } from "./audience-picker";
 import { useEditorState } from "./editor-state";
 
 export interface EditorDefaults {
@@ -19,6 +20,10 @@ export interface EditorDefaults {
   fromEmail: string;
   replyTo: string;
   html: string;
+  /** Visual-editor design JSON, or null when the HTML was written by hand. */
+  design: string | null;
+  /** null = no A/B test. */
+  abTest: { subjectB: string; testPercent: number; waitHours: number } | null;
 }
 
 // Where to send focus when the server rejects a field.
@@ -30,7 +35,9 @@ const FIELD_TARGETS: Record<string, string> = {
   fromEmail: "fromEmail",
   replyTo: "replyTo",
   listIds: "audience",
+  segmentIds: "audience",
   html: "content",
+  design: "content",
 };
 
 /**
@@ -41,13 +48,17 @@ export function EditorForm({
   campaignId,
   defaults,
   lists,
+  segments,
   selectedListIds,
+  selectedSegmentIds,
   recipientCount,
 }: {
   campaignId: string;
   defaults: EditorDefaults;
   lists: ListOption[];
+  segments: SegmentOption[];
   selectedListIds: string[];
+  selectedSegmentIds: string[];
   recipientCount: number;
 }) {
   const { dirty, setDirty } = useEditorState();
@@ -145,6 +156,7 @@ export function EditorForm({
               />
             </Field>
             <InboxPreview fromName={fromName} subject={subject} previewText={previewText} />
+            <AbTestFields defaults={defaults.abTest} errors={errors} />
           </CardBody>
         </Card>
 
@@ -193,9 +205,11 @@ export function EditorForm({
 
         <AudiencePicker
           lists={lists}
-          initialSelected={selectedListIds}
+          segments={segments}
+          initialLists={selectedListIds}
+          initialSegments={selectedSegmentIds}
           initialCount={recipientCount}
-          error={errors.listIds?.[0]}
+          error={errors.listIds?.[0] ?? errors.segmentIds?.[0]}
           onEdit={markDirty}
         />
       </div>
@@ -203,17 +217,19 @@ export function EditorForm({
       <Card id="content" className="scroll-mt-6 lg:col-span-3">
         <CardHeader
           title="Content"
-          description="Edit the email's HTML. The preview uses sample data for merge tags."
+          description="Design the email or edit its HTML. The preview uses sample data for merge tags."
         />
         <CardBody>
-          {errors.html ? (
+          {errors.html || errors.design ? (
             <Alert tone="error" className="mb-4">
-              {errors.html[0]}
+              {(errors.html ?? errors.design)?.[0]}
             </Alert>
           ) : null}
           <EmailEditor
             name="html"
             defaultValue={defaults.html}
+            designName="design"
+            defaultDesign={defaults.design}
             previewText={previewText}
             minHeight={560}
             onChange={markDirty}
@@ -265,6 +281,107 @@ function SaveStatus({ pending, dirty, state }: { pending: boolean; dirty: boolea
     <p className="min-w-0 text-sm" aria-live="polite">
       {content}
     </p>
+  );
+}
+
+/** Toggle + settings for an A/B test of the subject line (submitted as abEnabled, abSubjectB, ...). */
+function AbTestFields({
+  defaults,
+  errors,
+}: {
+  defaults: EditorDefaults["abTest"];
+  errors: Record<string, string[] | undefined>;
+}) {
+  const [enabled, setEnabled] = useState(defaults !== null);
+  // Kept in state so switching the test off and on again doesn't lose what was typed.
+  const [subjectB, setSubjectB] = useState(defaults?.subjectB ?? "");
+  const [testPercent, setTestPercent] = useState(String(defaults?.testPercent ?? AB_TEST_DEFAULTS.testPercent));
+  const [waitHours, setWaitHours] = useState(String(defaults?.waitHours ?? AB_TEST_DEFAULTS.waitHours));
+
+  return (
+    <div className="rounded-md ring-1 ring-inset ring-slate-200">
+      {/* Tells the save action these fields were on the form. */}
+      <input type="hidden" name="abForm" value="1" />
+      <label className="flex cursor-pointer items-start gap-3 px-4 py-3">
+        <input
+          type="checkbox"
+          name="abEnabled"
+          value="1"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+          aria-controls="ab-test-fields"
+          aria-expanded={enabled}
+          className="mt-0.5 h-4 w-4 shrink-0 accent-indigo-600"
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-medium text-slate-900">A/B test the subject line</span>
+          <span className="mt-0.5 block text-xs text-slate-500">
+            Part of your audience gets subject A or subject B; after the wait, the one with the better open rate goes
+            to everyone else.
+          </span>
+        </span>
+      </label>
+      {enabled ? (
+        <div id="ab-test-fields" className="space-y-4 border-t border-slate-200 px-4 py-4">
+          <Field
+            label="Subject B"
+            htmlFor="abSubjectB"
+            hint="Subject A is the subject line above."
+            error={errors.abSubjectB}
+          >
+            <Input
+              id="abSubjectB"
+              name="abSubjectB"
+              value={subjectB}
+              onChange={(e) => setSubjectB(e.target.value)}
+              maxLength={300}
+              placeholder="A different way to say it"
+              aria-invalid={errors.abSubjectB ? true : undefined}
+            />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Test size (%)"
+              htmlFor="abTestPercent"
+              hint="Share of recipients in the test, split evenly between A and B."
+              error={errors.abTestPercent}
+            >
+              <Input
+                id="abTestPercent"
+                name="abTestPercent"
+                type="number"
+                inputMode="numeric"
+                min={AB_TEST_LIMITS.testPercent.min}
+                max={AB_TEST_LIMITS.testPercent.max}
+                step={1}
+                value={testPercent}
+                onChange={(e) => setTestPercent(e.target.value)}
+                aria-invalid={errors.abTestPercent ? true : undefined}
+              />
+            </Field>
+            <Field
+              label="Wait time (hours)"
+              htmlFor="abWaitHours"
+              hint="How long to collect opens before picking the winner."
+              error={errors.abWaitHours}
+            >
+              <Input
+                id="abWaitHours"
+                name="abWaitHours"
+                type="number"
+                inputMode="numeric"
+                min={AB_TEST_LIMITS.waitHours.min}
+                max={AB_TEST_LIMITS.waitHours.max}
+                step={1}
+                value={waitHours}
+                onChange={(e) => setWaitHours(e.target.value)}
+                aria-invalid={errors.abWaitHours ? true : undefined}
+              />
+            </Field>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

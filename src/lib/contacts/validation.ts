@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isValidEmail, normalizeEmail } from "../utils";
+import { MAX_TAGS_PER_CONTACT, normalizeTag, splitTags, tagError, uniqueTags } from "./tags";
 
 // Pure validation helpers shared by the contact forms (client + server), the
 // CSV importer and the "paste emails into a list" form. No DB access here.
@@ -85,16 +86,48 @@ const customFieldRows = z
     return fields;
   });
 
+/** Tags from the chip editor: normalised (lower-cased, trimmed) and unique. Missing = none. */
+const tagList = z
+  .array(z.string())
+  .optional()
+  .transform((raw, ctx) => {
+    const tags = uniqueTags(raw ?? []);
+    for (const tag of tags) {
+      const problem = tagError(tag);
+      if (problem) {
+        ctx.addIssue({ code: "custom", message: `"${tag.slice(0, 60)}": ${problem}` });
+        return z.NEVER;
+      }
+    }
+    if (tags.length > MAX_TAGS_PER_CONTACT) {
+      ctx.addIssue({ code: "custom", message: `A contact can have at most ${MAX_TAGS_PER_CONTACT} tags.` });
+      return z.NEVER;
+    }
+    return tags;
+  });
+
 export const contactInputSchema = z.object({
   email: emailSchema,
   firstName: optionalName,
   lastName: optionalName,
   fields: customFieldRows,
   listIds: z.array(z.string().min(1)).transform((ids) => [...new Set(ids)]),
+  tags: tagList,
 });
 
 export type ContactInput = z.output<typeof contactInputSchema>;
-export type ContactFieldErrors = Partial<Record<"email" | "firstName" | "lastName" | "fields" | "listIds", string>>;
+export type ContactFieldErrors = Partial<Record<"email" | "firstName" | "lastName" | "fields" | "listIds" | "tags", string>>;
+
+/** One tag typed into a bulk-action field: normalised, or a friendly error. */
+export const tagSchema = z.string().transform((raw, ctx) => {
+  const tag = normalizeTag(raw);
+  const problem = tagError(tag);
+  if (problem) {
+    ctx.addIssue({ code: "custom", message: problem });
+    return z.NEVER;
+  }
+  return tag;
+});
 
 /** Read the contact form's FormData into the shape `contactInputSchema` expects. */
 export function contactFormValues(formData: FormData) {
@@ -106,6 +139,8 @@ export function contactFormValues(formData: FormData) {
     lastName: String(formData.get("lastName") ?? ""),
     fields: keys.map((key, i) => ({ key, value: values[i] ?? "" })),
     listIds: formData.getAll("listIds").map(String),
+    // Chips, plus whatever is still typed in the tag box when the form is saved.
+    tags: [...formData.getAll("tags").map(String), ...splitTags(String(formData.get("tagDraft") ?? ""))],
   };
 }
 

@@ -3,7 +3,12 @@
 // next/* imports, so the worker can run it under tsx.
 
 export { CampaignError, type CampaignErrorCode } from "./errors";
-export { countRecipients, countCampaignRecipients, recipientsFilter } from "./recipients";
+export {
+  countRecipients,
+  countCampaignRecipients,
+  recipientsFilter,
+  audienceRecipientsFilter,
+} from "./recipients";
 export {
   getCampaignProblems,
   queueCampaign,
@@ -17,9 +22,42 @@ export {
   getCampaignStats,
   getCampaignsStats,
   getTopLinks,
+  getVariantStats,
+  getCampaignTimeline,
   emptyStats,
+  TIMELINE_HOURS,
   type CampaignStats,
 } from "./stats";
+export {
+  abTestSize,
+  createAbAssigner,
+  hasAbTest,
+  pickWinner,
+  subjectForVariant,
+  type Variant,
+} from "./ab";
+export {
+  recordBounce,
+  recordComplaint,
+  mailboxRejection,
+  pauseCampaignIfBouncing,
+  bounceRatePercent,
+  exceedsBounceLimit,
+  BOUNCE_PAUSE_MIN_SENDS,
+  type AutoPause,
+  type BounceInput,
+  type BounceResult,
+} from "./bounces";
+export { remainingDailyQuota, countSentToday, quotaLeft, startOfUtcDay, utcDayKey } from "./quota";
+export {
+  parseWebhook,
+  isWebhookProvider,
+  isAmazonUrl,
+  WEBHOOK_PROVIDERS,
+  type FeedbackEvent,
+  type ParsedWebhook,
+  type WebhookProvider,
+} from "./webhooks";
 export {
   buildCampaignEmail,
   buildEmail,
@@ -31,9 +69,11 @@ export {
   recordOpen,
   recordClick,
   unsubscribeBySend,
+  leaveLists,
   getUnsubscribeInfo,
   maskEmail,
   isPlausibleSendId,
+  isBotUserAgent,
   type UnsubscribeResult,
   type UnsubscribeInfo,
 } from "./tracking";
@@ -42,6 +82,7 @@ export {
   startDueScheduledCampaigns,
   processBatch,
   finalizeCampaigns,
+  decideAbWinner,
   Pacer,
   MAX_ATTEMPTS,
   STUCK_SEND_MS,

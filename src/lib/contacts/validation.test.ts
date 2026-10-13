@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { contactInputSchema, fieldKeyError, listInputSchema, parseEmailList, slugifyFieldKey } from "./validation";
+import {
+  contactFormValues,
+  contactInputSchema,
+  fieldKeyError,
+  listInputSchema,
+  parseEmailList,
+  slugifyFieldKey,
+  tagSchema,
+} from "./validation";
 
 describe("fieldKeyError", () => {
   test("accepts simple names", () => {
@@ -81,6 +89,41 @@ describe("contactInputSchema", () => {
 
   test("de-duplicates list ids", () => {
     assert.deepEqual(contactInputSchema.parse({ ...base, listIds: ["a", "b", "a"] }).listIds, ["a", "b"]);
+  });
+
+  test("tags default to none and are lower-cased, trimmed and unique", () => {
+    assert.deepEqual(contactInputSchema.parse(base).tags, []);
+    assert.deepEqual(contactInputSchema.parse({ ...base, tags: [" VIP ", "vip", "", "Early  Bird"] }).tags, ["vip", "early bird"]);
+  });
+
+  test("rejects over-long tags, separators inside a tag and too many tags", () => {
+    for (const tags of [["x".repeat(51)], ["a,b"], Array.from({ length: 101 }, (_, i) => `t${i}`)]) {
+      const result = contactInputSchema.safeParse({ ...base, tags });
+      assert.equal(result.success, false, JSON.stringify(tags).slice(0, 40));
+      assert.equal(result.error!.issues[0].path[0], "tags");
+    }
+    assert.equal(contactInputSchema.safeParse({ ...base, tags: ["x".repeat(50)] }).success, true);
+  });
+});
+
+describe("contactFormValues", () => {
+  test("reads tag chips plus the text still typed in the tag box", () => {
+    const form = new FormData();
+    form.set("email", "jane@example.com");
+    form.append("tags", "vip");
+    form.append("tags", "news");
+    form.set("tagDraft", "Early Bird; VIP");
+    const parsed = contactInputSchema.parse(contactFormValues(form));
+    assert.deepEqual(parsed.tags, ["vip", "news", "early bird"]);
+  });
+});
+
+describe("tagSchema", () => {
+  test("normalises one tag or explains what is wrong", () => {
+    assert.equal(tagSchema.parse("  Webinar  2026 "), "webinar 2026");
+    assert.equal(tagSchema.safeParse("   ").success, false);
+    assert.equal(tagSchema.safeParse("a;b").success, false);
+    assert.match(tagSchema.safeParse("x".repeat(51)).error!.issues[0].message, /at most 50/);
   });
 });
 

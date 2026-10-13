@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/layout";
-import { getListOptions } from "@/lib/contacts/queries";
+import { getListOptions, getTagOptions } from "@/lib/contacts/queries";
 import { createContactAction } from "../actions";
 import { ContactForm } from "../_components/contact-form";
 
@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Add contact" };
 
 export default async function NewContactPage({ searchParams }: { searchParams: Promise<{ list?: string }> }) {
   const { list } = await searchParams;
-  const lists = await getListOptions();
+  const [lists, tagOptions] = await Promise.all([getListOptions(), getTagOptions()]);
   const preselected = lists.some((l) => l.id === list) ? [list!] : [];
 
   return (
@@ -26,7 +26,8 @@ export default async function NewContactPage({ searchParams }: { searchParams: P
       <ContactForm
         action={createContactAction}
         lists={lists}
-        initial={{ email: "", firstName: null, lastName: null, fields: {}, listIds: preselected }}
+        initial={{ email: "", firstName: null, lastName: null, fields: {}, listIds: preselected, tags: [] }}
+        knownTags={tagOptions.map((t) => t.tag)}
         submitLabel="Add contact"
         pendingLabel="Adding..."
         cancelHref="/contacts"

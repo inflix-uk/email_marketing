@@ -8,8 +8,9 @@ import type { Filter } from "mongodb";
 import { collections, isDuplicateKeyError } from "@/db";
 import { newId, type CampaignDoc, type CampaignStatus, type SendDoc } from "@/db/schema";
 import { isValidEmail } from "@/lib/utils";
+import { abHoldbackMs, createAbAssigner, hasAbTest } from "./ab";
 import { CampaignError } from "./errors";
-import { countRecipients, recipientsFilter } from "./recipients";
+import { audienceRecipientsFilter, countRecipients } from "./recipients";
 
 /** Sends inserted per insertMany call while building the queue. */
 const INSERT_CHUNK = 1000;
@@ -41,14 +42,21 @@ export async function getCampaignProblems(campaignId: string): Promise<string[]>
 
   if (!campaign.html?.trim()) problems.push("The email content is empty");
 
+  if (campaign.abTest && !hasAbTest(campaign.abTest)) {
+    problems.push("Add the second subject line for the A/B test, or turn the test off");
+  }
+
   const listIds = campaign.listIds ?? [];
-  if (listIds.length === 0) {
-    problems.push("Choose at least one list to send to");
-  } else if ((await countRecipients(listIds)) === 0) {
-    problems.push("The selected lists have no subscribed contacts");
+  const segmentIds = campaign.segmentIds ?? [];
+  if (listIds.length === 0 && segmentIds.length === 0) {
+    problems.push("Choose at least one list or segment to send to");
+  } else if ((await countRecipients(listIds, segmentIds)) === 0) {
+    problems.push(NO_RECIPIENTS);
   }
   return problems;
 }
+
+const NO_RECIPIENTS = "The selected lists and segments have no subscribed contacts";
 
 function problemsMessage(problems: string[]): string {
   return problems.length === 1
@@ -81,6 +89,12 @@ async function currentStatus(campaignId: string): Promise<CampaignStatus | undef
   return row?.status;
 }
 
+/**
+ * Campaign field (not in CampaignDoc yet): true once someone resumed a
+ * campaign that had been auto-paused for its bounce rate.
+ */
+export const BOUNCE_PAUSE_IGNORED = "bouncePauseIgnored";
+
 /** Filter part: nobody is queueing this campaign (no lock, or a stale one). */
 export function queueLockFree(now: Date = new Date()): Filter<CampaignDoc> {
   return {
@@ -90,7 +104,9 @@ export function queueLockFree(now: Date = new Date()): Filter<CampaignDoc> {
 
 /**
  * draft|scheduled -> sending. Creates one queued send per subscribed contact
- * in the campaign's lists, then flips the campaign to "sending".
+ * in the campaign's audience (lists + segments), then flips the campaign to
+ * "sending". With an A/B test, the test group is queued for now (variant
+ * "A"/"B") and everyone else (variant null) for after the wait - see ./ab.
  *
  * Without transactions, crash safety comes from:
  * 1. a claim: `queueLockedAt` is set atomically while the status is still
@@ -112,7 +128,7 @@ export async function queueCampaign(campaignId: string): Promise<{ queued: numbe
   const claimed = await campaigns.findOneAndUpdate(
     { _id: campaignId, status: { $in: ["draft", "scheduled"] }, ...queueLockFree(lockedAt) },
     { $set: { queueLockedAt: lockedAt, updatedAt: lockedAt } },
-    { returnDocument: "after", projection: { listIds: 1 } },
+    { returnDocument: "after", projection: { listIds: 1, segmentIds: 1, abTest: 1 } },
   );
   if (!claimed) {
     const current = await campaigns.findOne({ _id: campaignId }, { projection: { status: 1, queueLockedAt: 1 } });
@@ -145,9 +161,18 @@ export async function queueCampaign(campaignId: string): Promise<{ queued: numbe
 
     // 2. Stream the audience into the queue.
     const now = new Date();
-    const cursor = contacts
-      .find(recipientsFilter(claimed.listIds ?? []), { projection: { _id: 1, email: 1 } })
-      .batchSize(INSERT_CHUNK);
+    const audience = await audienceRecipientsFilter(claimed.listIds ?? [], claimed.segmentIds ?? []);
+    // A/B test: pick the test group while streaming; the rest waits for the winner.
+    const abTest = hasAbTest(claimed.abTest) ? claimed.abTest : null;
+    const assign = abTest
+      ? createAbAssigner({
+          total: await contacts.countDocuments(audience),
+          testPercent: abTest.testPercent,
+          seed: campaignId,
+        })
+      : null;
+    const afterTest = abTest ? new Date(now.getTime() + abHoldbackMs(abTest)) : now;
+    const cursor = contacts.find(audience, { projection: { _id: 1, email: 1 } }).batchSize(INSERT_CHUNK);
     let chunk: SendDoc[] = [];
     const flush = async () => {
       if (chunk.length === 0) return;
@@ -157,7 +182,12 @@ export async function queueCampaign(campaignId: string): Promise<{ queued: numbe
     };
     try {
       for await (const contact of cursor) {
-        chunk.push(newSend(campaignId, contact._id, contact.email, now));
+        const send = newSend(campaignId, contact._id, contact.email, now);
+        if (assign) {
+          send.variant = assign();
+          if (send.variant === null) send.nextAttemptAt = afterTest;
+        }
+        chunk.push(send);
         if (chunk.length >= INSERT_CHUNK) await flush();
       }
       await flush();
@@ -167,7 +197,7 @@ export async function queueCampaign(campaignId: string): Promise<{ queued: numbe
 
     const total = await sends.countDocuments({ campaignId });
     if (total === 0) {
-      throw new CampaignError("The selected lists have no subscribed contacts.", "problems");
+      throw new CampaignError(`${NO_RECIPIENTS}.`, "problems");
     }
 
     // 3. Publish: only now can the worker see it.
@@ -175,7 +205,16 @@ export async function queueCampaign(campaignId: string): Promise<{ queued: numbe
     const published = await campaigns.updateOne(
       { _id: campaignId, status: { $in: ["draft", "scheduled"] }, queueLockedAt: lockedAt },
       {
-        $set: { status: "sending", startedAt: started, completedAt: null, totalRecipients: total, updatedAt: started },
+        $set: {
+          status: "sending",
+          startedAt: started,
+          completedAt: null,
+          totalRecipients: total,
+          pauseReason: null,
+          updatedAt: started,
+          // A fresh test: no winner yet (matters for campaigns copied from a finished one).
+          ...(claimed.abTest ? { "abTest.winner": null, "abTest.decidedAt": null } : {}),
+        },
         $unset: { queueLockedAt: "" },
       },
     );
@@ -202,6 +241,7 @@ function newSend(campaignId: string, contactId: string, email: string, now: Date
   return {
     _id: newId(),
     campaignId,
+    kind: "campaign",
     contactId,
     email,
     status: "queued",
@@ -264,18 +304,31 @@ export async function pauseCampaign(campaignId: string): Promise<void> {
   const { campaigns } = await collections();
   const res = await campaigns.updateOne(
     { _id: campaignId, status: "sending" },
-    { $set: { status: "paused", updatedAt: new Date() } },
+    { $set: { status: "paused", pauseReason: null, updatedAt: new Date() } },
   );
   if (res.matchedCount === 0) throw new CampaignError(statusMessage(await currentStatus(campaignId), "paused"));
 }
 
-/** paused -> sending. */
+/**
+ * paused -> sending, clearing `pauseReason`. Resuming a campaign the system
+ * paused (high bounce rate) is an explicit decision to carry on, so it is
+ * remembered in `bouncePauseIgnored` and that campaign isn't auto-paused again.
+ */
 export async function resumeCampaign(campaignId: string): Promise<void> {
   const { campaigns } = await collections();
-  const res = await campaigns.updateOne(
-    { _id: campaignId, status: "paused" },
-    { $set: { status: "sending", updatedAt: new Date() } },
-  );
+  // One pipeline update: every expression reads the document as it was before.
+  const res = await campaigns.updateOne({ _id: campaignId, status: "paused" }, [
+    {
+      $set: {
+        status: "sending",
+        [BOUNCE_PAUSE_IGNORED]: {
+          $or: [{ $eq: [`$${BOUNCE_PAUSE_IGNORED}`, true] }, { $ne: [{ $ifNull: ["$pauseReason", null] }, null] }],
+        },
+        pauseReason: null,
+        updatedAt: new Date(),
+      },
+    },
+  ]);
   if (res.matchedCount === 0) {
     const status = await currentStatus(campaignId);
     throw new CampaignError(

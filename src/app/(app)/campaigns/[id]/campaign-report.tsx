@@ -2,29 +2,53 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { EmailPreview } from "@/components/email-editor";
 import { Alert } from "@/components/ui/form";
-import { Card, CardBody, CardHeader, EmptyState, PageHeader, Stat, StatusBadge, Table, TBody, Td, Th } from "@/components/ui/layout";
-import type { Campaign } from "@/db/schema";
-import { getCampaignStats, getTopLinks, type CampaignStats } from "@/lib/sending";
+import {
+  Badge,
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  PageHeader,
+  Stat,
+  StatusBadge,
+  Table,
+  TBody,
+  Td,
+  Th,
+} from "@/components/ui/layout";
+import type { AbTest, Campaign } from "@/db/schema";
+import {
+  getCampaignStats,
+  getCampaignTimeline,
+  getTopLinks,
+  getVariantStats,
+  type CampaignStats,
+} from "@/lib/sending";
 import { cn, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
-import { cancelSending, duplicateCampaign, pauseSending, resumeSending } from "../actions";
+import { cancelSending, duplicateCampaign, pauseSending, resendToNonOpeners, resumeSending } from "../actions";
 import { ActionButton, ConfirmButton } from "../_components/action-buttons";
+import { DownloadLink } from "../_components/download-link";
 import { FilterTabs } from "../_components/filter-tabs";
 import { Pagination } from "../_components/pagination";
 import {
   getListNames,
   getRecipientsPage,
+  getSegmentNames,
   RECIPIENT_FILTERS,
   RECIPIENTS_PAGE_SIZE,
   type RecipientFilter,
   type RecipientRow,
 } from "../_lib/queries";
+import { buildTimeline } from "../_lib/timeline";
 import { AutoRefresh } from "./auto-refresh";
+import { TimelineChart } from "./timeline-chart";
 
 const FILTER_LABELS: Record<RecipientFilter, string> = {
   all: "All",
   opened: "Opened",
   clicked: "Clicked",
   unsubscribed: "Unsubscribed",
+  bounced: "Bounced",
   failed: "Failed / skipped",
 };
 
@@ -33,6 +57,7 @@ const FILTER_EMPTY: Record<RecipientFilter, string> = {
   opened: "Nobody has opened this email yet.",
   clicked: "Nobody has clicked a link yet.",
   unsubscribed: "Nobody unsubscribed from this campaign.",
+  bounced: "No bounced emails.",
   failed: "No failed or skipped emails.",
 };
 
@@ -44,6 +69,8 @@ function filterCount(filter: RecipientFilter, stats: CampaignStats): number {
       return stats.clicked;
     case "unsubscribed":
       return stats.unsubscribed;
+    case "bounced":
+      return stats.bounced;
     case "failed":
       return stats.failed + stats.skipped;
     default:
@@ -61,12 +88,20 @@ export async function CampaignReport({
   filter: RecipientFilter;
   page: number;
 }) {
-  const [stats, topLinks, recipients, lists] = await Promise.all([
+  const [stats, topLinks, recipients, lists, segments, variants, buckets] = await Promise.all([
     getCampaignStats(campaign.id),
     getTopLinks(campaign.id, 10),
     getRecipientsPage(campaign.id, filter, page),
     getListNames(campaign.listIds ?? []),
+    getSegmentNames(campaign.segmentIds ?? []),
+    campaign.abTest ? getVariantStats(campaign.id) : null,
+    getCampaignTimeline(campaign.id),
   ]);
+  const timeline = buildTimeline(buckets, campaign.startedAt);
+  const audience = [
+    lists.length ? `${lists.length} ${lists.length === 1 ? "list" : "lists"}` : "",
+    segments.length ? `${segments.length} ${segments.length === 1 ? "segment" : "segments"}` : "",
+  ].filter(Boolean);
 
   const total = stats.total || campaign.totalRecipients;
   const processed = stats.sent + stats.failed + stats.skipped;
@@ -127,12 +162,24 @@ export async function CampaignReport({
                 pendingText="Cancelling..."
               />
             ) : null}
+            {campaign.status === "sent" ? (
+              <ActionButton action={resendToNonOpeners.bind(null, campaign.id)} pendingText="Creating draft...">
+                Resend to non-openers
+              </ActionButton>
+            ) : null}
             <ActionButton action={duplicateCampaign.bind(null, campaign.id)} pendingText="Duplicating...">
               Duplicate
             </ActionButton>
           </>
         }
       />
+
+      {campaign.pauseReason ? (
+        <Alert tone="warning" className="mb-6">
+          <strong className="font-semibold">Sending was paused automatically.</strong> {campaign.pauseReason}
+          {campaign.status === "paused" ? " Check your list before you resume." : null}
+        </Alert>
+      ) : null}
 
       {inProgress ? (
         <Card className="mb-6">
@@ -182,12 +229,8 @@ export async function CampaignReport({
         </Alert>
       ) : null}
 
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <Stat
-          label="Recipients"
-          value={formatNumber(total)}
-          hint={lists.length ? `${lists.length} ${lists.length === 1 ? "list" : "lists"}` : undefined}
-        />
+      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Stat label="Recipients" value={formatNumber(total)} hint={audience.join(" · ") || undefined} />
         <Stat label="Delivered" value={formatNumber(stats.sent)} hint={`${formatPercent(stats.sent, total)} of recipients`} />
         <Stat
           label="Opens"
@@ -205,6 +248,16 @@ export async function CampaignReport({
           hint={`${formatPercent(stats.unsubscribed, stats.sent)} of delivered`}
         />
         <Stat
+          label="Bounced"
+          value={formatNumber(stats.bounced)}
+          hint={`${formatPercent(stats.bounced, stats.sent)} of delivered`}
+        />
+        <Stat
+          label="Complaints"
+          value={formatNumber(stats.complained)}
+          hint={`${formatPercent(stats.complained, stats.sent)} marked it as spam`}
+        />
+        <Stat
           label="Failed / skipped"
           value={formatNumber(stats.failed + stats.skipped)}
           hint={`${formatNumber(stats.failed)} failed · ${formatNumber(stats.skipped)} skipped`}
@@ -214,6 +267,22 @@ export async function CampaignReport({
         Rates are based on delivered emails. Open rates are approximate: some email apps block tracking images, others
         load them automatically.
       </p>
+
+      {campaign.abTest ? <AbTestCard abTest={campaign.abTest} subjectA={campaign.subject} variants={variants} /> : null}
+
+      <Card className="mb-6">
+        <CardHeader
+          title="Opens and clicks over time"
+          description="First opens and link clicks per hour, for the first 72 hours after sending started."
+        />
+        <CardBody>
+          {timeline.length ? (
+            <TimelineChart points={timeline} />
+          ) : (
+            <p className="text-sm text-slate-500">No opens or clicks yet.</p>
+          )}
+        </CardBody>
+      </Card>
 
       <Card className="mb-6 overflow-hidden">
         <CardHeader title="Top links" description="Tracked links in this email, by unique clicks." />
@@ -260,7 +329,15 @@ export async function CampaignReport({
       </Card>
 
       <Card id="recipients" className="mb-6 scroll-mt-6 overflow-hidden">
-        <CardHeader title="Recipients" description="Everyone this campaign was queued for, and what they did." />
+        <CardHeader
+          title="Recipients"
+          description="Everyone this campaign was queued for, and what they did."
+          actions={
+            stats.total > 0 ? (
+              <DownloadLink href={`/api/campaigns/${campaign.id}/export`}>Export CSV</DownloadLink>
+            ) : null
+          }
+        />
         <FilterTabs
           label="Filter recipients"
           className="px-3"
@@ -291,13 +368,15 @@ export async function CampaignReport({
         <CardHeader title="Email" description="What recipients received. Merge tags are filled in with sample data here." />
         <div className="grid gap-6 p-5 lg:grid-cols-3">
           <dl className="space-y-4 text-sm">
-            <Meta label="Subject">{campaign.subject || "—"}</Meta>
+            <Meta label={campaign.abTest ? "Subject A" : "Subject"}>{campaign.subject || "—"}</Meta>
+            {campaign.abTest ? <Meta label="Subject B">{campaign.abTest.subjectB}</Meta> : null}
             {campaign.previewText ? <Meta label="Preview text">{campaign.previewText}</Meta> : null}
             <Meta label="From">
               {campaign.fromName} &lt;{campaign.fromEmail}&gt;
             </Meta>
             {campaign.replyTo ? <Meta label="Reply-to">{campaign.replyTo}</Meta> : null}
             <Meta label="Lists">{lists.length ? lists.map((l) => l.name).join(", ") : "—"}</Meta>
+            {segments.length ? <Meta label="Segments">{segments.map((s) => s.name).join(", ")}</Meta> : null}
             <Meta label="Started">{formatDateTime(campaign.startedAt)}</Meta>
             <Meta label="Finished">{formatDateTime(campaign.completedAt)}</Meta>
           </dl>
@@ -334,14 +413,86 @@ function Meta({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+/** A vs B results of the subject-line test, and the winner once it's decided. */
+function AbTestCard({
+  abTest,
+  subjectA,
+  variants,
+}: {
+  abTest: AbTest;
+  subjectA: string;
+  variants: { A: CampaignStats; B: CampaignStats } | null;
+}) {
+  const rows = [
+    { variant: "A" as const, subject: subjectA },
+    { variant: "B" as const, subject: abTest.subjectB },
+  ];
+  const rest = 100 - abTest.testPercent;
+  let summary: string;
+  if (abTest.winner) {
+    summary = `Subject ${abTest.winner} won on open rate${abTest.decidedAt ? ` (decided ${formatDateTime(abTest.decidedAt)})` : ""}${
+      rest > 0 ? ` and went to the remaining ${rest}% of recipients.` : "."
+    }`;
+  } else if (rest > 0) {
+    summary = `${abTest.testPercent}% of recipients are in the test. The subject with the better open rate after ${abTest.waitHours} ${
+      abTest.waitHours === 1 ? "hour" : "hours"
+    } goes to the remaining ${rest}%.`;
+  } else {
+    summary = "Everyone is in the test: half got subject A, half got subject B.";
+  }
+
+  return (
+    <Card className="mb-6 overflow-hidden">
+      <CardHeader title="A/B subject test" description={summary} />
+      <Table>
+        <thead className="bg-slate-50">
+          <tr>
+            <Th>Subject</Th>
+            <Th className="text-right">Sent</Th>
+            <Th className="text-right">Open rate</Th>
+            <Th className="text-right">Click rate</Th>
+          </tr>
+        </thead>
+        <TBody>
+          {rows.map((row) => {
+            const stats = variants?.[row.variant];
+            return (
+              <tr key={row.variant}>
+                <Td className="max-w-0 w-full">
+                  <span className="flex items-center gap-2">
+                    <span className="shrink-0 font-semibold text-slate-900">{row.variant}</span>
+                    <span className="truncate" title={row.subject}>
+                      {row.subject || "—"}
+                    </span>
+                    {abTest.winner === row.variant ? <Badge tone="green">Winner</Badge> : null}
+                  </span>
+                </Td>
+                <Td className="text-right tabular-nums">{stats ? formatNumber(stats.sent) : "—"}</Td>
+                <Td className="whitespace-nowrap text-right tabular-nums">
+                  {stats ? formatPercent(stats.opened, stats.sent) : "—"}
+                </Td>
+                <Td className="whitespace-nowrap text-right tabular-nums">
+                  {stats ? formatPercent(stats.clicked, stats.sent) : "—"}
+                </Td>
+              </tr>
+            );
+          })}
+        </TBody>
+      </Table>
+    </Card>
+  );
+}
+
 function RecipientsTable({ rows }: { rows: RecipientRow[] }) {
   const showErrors = rows.some((r) => r.lastError && (r.status === "failed" || r.status === "skipped"));
+  const showVariant = rows.some((r) => r.variant);
   return (
     <Table>
       <thead className="bg-slate-50">
         <tr>
           <Th>Email</Th>
           <Th>Status</Th>
+          {showVariant ? <Th>Subject</Th> : null}
           <Th>Sent</Th>
           <Th>Opened</Th>
           <Th>Clicked</Th>
@@ -359,9 +510,12 @@ function RecipientsTable({ rows }: { rows: RecipientRow[] }) {
             <Td>
               <span className="inline-flex flex-wrap gap-1">
                 <StatusBadge status={row.status} />
+                {row.bouncedAt ? <StatusBadge status="bounced" /> : null}
+                {row.complainedAt ? <Badge tone="red">spam complaint</Badge> : null}
                 {row.unsubscribedAt ? <StatusBadge status="unsubscribed" /> : null}
               </span>
             </Td>
+            {showVariant ? <Td>{row.variant ?? <span className="text-slate-400">—</span>}</Td> : null}
             <Td className="whitespace-nowrap">{formatDateTime(row.sentAt)}</Td>
             <Td className="whitespace-nowrap">
               <When date={row.openedAt} count={row.openCount} />

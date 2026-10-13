@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { collections } from "@/db";
-import { fromDoc, newId, type CampaignDoc, type CampaignStatus } from "@/db/schema";
+import { fromDoc, newId, type AbTest, type CampaignDoc, type CampaignStatus } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
+import { parseDesign, renderDesign, serializeDesign } from "@/lib/email-design";
+import { createNonOpenersSegment } from "@/lib/segments";
 import { getSettings } from "@/lib/settings";
 import {
   CampaignError,
@@ -21,7 +23,8 @@ import {
 } from "@/lib/sending";
 import { STARTER_TEMPLATES } from "@/lib/starter-templates";
 import { formatNumber, isValidEmail, normalizeEmail } from "@/lib/utils";
-import { EDITABLE_STATUSES, existingListIds } from "./_lib/queries";
+import { AB_TEST_DEFAULTS } from "./_lib/ab-test";
+import { EDITABLE_STATUSES, existingListIds, existingSegmentIds } from "./_lib/queries";
 import { BLANK_HTML, parseStartingPoint } from "./_lib/starting-points";
 
 /** Not being queued right now (queueCampaign holds a lock while it builds the send list). A stale lock from a crash doesn't count. */
@@ -135,6 +138,8 @@ export async function createCampaign(_prev: ActionState, formData: FormData): Pr
     fromEmail: settings.fromEmail,
     replyTo: settings.replyTo || null,
     listIds: [],
+    segmentIds: [],
+    abTest: null,
     status: "draft",
     scheduledAt: null,
     startedAt: null,
@@ -154,7 +159,7 @@ async function resolveStartingPoint(source: string) {
   const point = parseStartingPoint(source);
   if (!point) return null;
   if (point.kind === "blank") {
-    return { subject: "", previewText: null, html: BLANK_HTML, templateId: null };
+    return { subject: "", previewText: null, html: BLANK_HTML, design: null, templateId: null };
   }
   if (point.kind === "starter") {
     const starter = STARTER_TEMPLATES.find((t) => t.key === point.key);
@@ -163,6 +168,8 @@ async function resolveStartingPoint(source: string) {
       subject: starter.subject,
       previewText: starter.previewText || null,
       html: starter.html,
+      // Starter designs open in the visual editor.
+      design: starter.design,
       templateId: null,
     };
   }
@@ -173,6 +180,8 @@ async function resolveStartingPoint(source: string) {
     subject: template.subject ?? "",
     previewText: template.previewText || null,
     html: template.html,
+    // A template built in the visual editor stays editable there.
+    design: template.design || null,
     templateId: template._id,
   };
 }
@@ -187,8 +196,52 @@ const saveSchema = z.object({
   fromEmail: optionalEmail,
   replyTo: optionalEmail,
   listIds: z.array(idSchema).max(500, "Choose at most 500 lists."),
+  segmentIds: z.array(idSchema).max(100, "Choose at most 100 segments."),
   html: z.string().max(2_000_000, "The email is too large (over 2 MB of HTML).").optional(),
+  design: z.string().max(4_000_000, "The email design is too large.").optional(),
 });
+
+const abTestSchema = z.object({
+  abSubjectB: headerText(300, "Subject B").refine((v) => v.length > 0, "Add a second subject line to test."),
+  abTestPercent: z.coerce
+    .number("Enter a test size from 10 to 100.")
+    .int("Enter a whole number from 10 to 100.")
+    .min(10, "The test size must be at least 10%.")
+    .max(100, "The test size can't be more than 100%."),
+  abWaitHours: z.coerce
+    .number("Enter a wait time from 1 to 72 hours.")
+    .int("Enter a whole number of hours.")
+    .min(1, "Wait at least 1 hour.")
+    .max(72, "Wait at most 72 hours."),
+});
+
+type AbTestResult =
+  | { ok: true; abTest: AbTest | null }
+  | { ok: false; fieldErrors: Record<string, string[] | undefined> };
+
+/** The editor's A/B fields -> campaign.abTest (null when the test is switched off). */
+function parseAbTest(formData: FormData, subject: string): AbTestResult {
+  if (!text(formData, "abEnabled")) return { ok: true, abTest: null };
+  const parsed = abTestSchema.safeParse({
+    abSubjectB: text(formData, "abSubjectB"),
+    abTestPercent: text(formData, "abTestPercent").trim() || AB_TEST_DEFAULTS.testPercent,
+    abWaitHours: text(formData, "abWaitHours").trim() || AB_TEST_DEFAULTS.waitHours,
+  });
+  if (!parsed.success) return { ok: false, fieldErrors: z.flattenError(parsed.error).fieldErrors };
+  if (parsed.data.abSubjectB.toLowerCase() === subject.toLowerCase()) {
+    return { ok: false, fieldErrors: { abSubjectB: ["Subject B must be different from the subject line."] } };
+  }
+  return {
+    ok: true,
+    abTest: {
+      subjectB: parsed.data.abSubjectB,
+      testPercent: parsed.data.abTestPercent,
+      waitHours: parsed.data.abWaitHours,
+      winner: null,
+      decidedAt: null,
+    },
+  };
+}
 
 export async function saveCampaign(campaignId: string, _prev: SaveState, formData: FormData): Promise<SaveState> {
   await requireSession();
@@ -204,16 +257,42 @@ export async function saveCampaign(campaignId: string, _prev: SaveState, formDat
     fromEmail: text(formData, "fromEmail"),
     replyTo: text(formData, "replyTo"),
     listIds: formData.getAll("listIds").filter((v): v is string => typeof v === "string"),
+    segmentIds: formData.getAll("segmentIds").filter((v): v is string => typeof v === "string"),
     // Missing field = leave the content alone rather than wiping it.
     html: formData.has("html") ? text(formData, "html") : undefined,
+    design: formData.has("design") ? text(formData, "design") : undefined,
   });
-  if (!parsed.success) {
-    return { error: "Please fix the highlighted fields.", fieldErrors: z.flattenError(parsed.error).fieldErrors };
+  // The A/B test is only touched when the form included its fields.
+  const ab = formData.has("abForm") && parsed.success ? parseAbTest(formData, parsed.data.subject) : null;
+  if (!parsed.success || (ab && !ab.ok)) {
+    return {
+      error: "Please fix the highlighted fields.",
+      fieldErrors: {
+        ...(parsed.success ? {} : z.flattenError(parsed.error).fieldErrors),
+        ...(ab && !ab.ok ? ab.fieldErrors : {}),
+      },
+    };
   }
   const data = parsed.data;
 
-  // Replace the whole selection, dropping lists that have been deleted since.
-  const listIds = await existingListIds(data.listIds);
+  // Replace the whole selection, dropping lists and segments that have been deleted since.
+  const [listIds, segmentIds] = await Promise.all([
+    existingListIds(data.listIds),
+    existingSegmentIds(data.segmentIds),
+  ]);
+
+  // Visual mode: the design is the source of truth. Store it in canonical form
+  // and render the HTML from it on the server, so the two can never drift.
+  let html = data.html;
+  let design = data.design;
+  if (design) {
+    const parsedDesign = parseDesign(design);
+    if (!parsedDesign) {
+      return { error: "The visual design couldn't be read, so nothing was saved. Reload the page and try again." };
+    }
+    design = serializeDesign(parsedDesign);
+    html = renderDesign(parsedDesign);
+  }
 
   const { campaigns } = await collections();
   const result = await campaigns.updateOne(
@@ -228,7 +307,11 @@ export async function saveCampaign(campaignId: string, _prev: SaveState, formDat
         fromEmail: data.fromEmail,
         replyTo: data.replyTo || null,
         listIds,
-        ...(data.html !== undefined ? { html: data.html } : {}),
+        segmentIds,
+        ...(html !== undefined ? { html } : {}),
+        // "" = the HTML was written by hand.
+        ...(design !== undefined ? { design: design || null } : {}),
+        ...(ab ? { abTest: ab.abTest } : {}),
         updatedAt: new Date(),
       },
     },
@@ -258,11 +341,16 @@ export async function saveCampaign(campaignId: string, _prev: SaveState, formDat
 }
 
 /** Live "N recipients" for the audience picker. */
-export async function estimateRecipients(listIds: string[]): Promise<number> {
+export async function estimateRecipients(listIds: string[], segmentIds: string[] = []): Promise<number> {
   await requireSession();
-  const parsed = z.array(idSchema).max(500).safeParse(listIds);
+  const parsed = z
+    .object({ listIds: z.array(idSchema).max(500), segmentIds: z.array(idSchema).max(100) })
+    .safeParse({ listIds, segmentIds });
   if (!parsed.success) return 0;
-  return countRecipients([...new Set(parsed.data)]);
+  const lists = [...new Set(parsed.data.listIds)];
+  const segments = [...new Set(parsed.data.segmentIds)];
+  if (lists.length + segments.length === 0) return 0;
+  return countRecipients(lists, segments);
 }
 
 // --- Test send ----------------------------------------------------------------
@@ -424,22 +512,24 @@ export async function cancelSending(campaignId: string): Promise<ActionState> {
 
 // --- Duplicate / delete -------------------------------------------------------
 
-export async function duplicateCampaign(campaignId: string): Promise<ActionState> {
-  await requireSession();
-  const source = await findCampaign(campaignId);
-  if (!source) return NOT_FOUND;
+/** A fresh draft with the content and sender of an existing campaign. */
+function draftCopy(
+  source: Omit<CampaignDoc, "_id">,
+  overrides: Pick<CampaignDoc, "name" | "listIds" | "segmentIds" | "abTest">,
+): CampaignDoc {
   const now = new Date();
-  const copy: CampaignDoc = {
+  return {
     _id: newId(),
-    name: `Copy of ${source.name}`.slice(0, 200),
     subject: source.subject,
     previewText: source.previewText,
     fromName: source.fromName,
     fromEmail: source.fromEmail,
     replyTo: source.replyTo,
     html: source.html,
+    design: source.design ?? null,
     templateId: source.templateId,
-    listIds: await existingListIds(source.listIds ?? []),
+    ...overrides,
+    name: overrides.name.slice(0, 200),
     status: "draft",
     scheduledAt: null,
     startedAt: null,
@@ -448,6 +538,51 @@ export async function duplicateCampaign(campaignId: string): Promise<ActionState
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export async function duplicateCampaign(campaignId: string): Promise<ActionState> {
+  await requireSession();
+  const source = await findCampaign(campaignId);
+  if (!source) return NOT_FOUND;
+  const [listIds, segmentIds] = await Promise.all([
+    existingListIds(source.listIds ?? []),
+    existingSegmentIds(source.segmentIds ?? []),
+  ]);
+  const copy = draftCopy(source, {
+    name: `Copy of ${source.name}`,
+    listIds,
+    segmentIds,
+    // Same test set-up, no result yet.
+    abTest: source.abTest ? { ...source.abTest, winner: null, decidedAt: null } : null,
+  });
+  const { campaigns } = await collections();
+  await campaigns.insertOne(copy);
+
+  revalidateCampaigns();
+  redirect(`/campaigns/${copy._id}`);
+}
+
+/** A draft copy of a sent campaign, aimed at the people who didn't open it. */
+export async function resendToNonOpeners(campaignId: string): Promise<ActionState> {
+  await requireSession();
+  const source = await findCampaign(campaignId);
+  if (!source) return NOT_FOUND;
+  if (source.status !== "sent") {
+    return { error: "You can resend to non-openers once the campaign has finished sending." };
+  }
+
+  let segmentId: string;
+  try {
+    segmentId = await createNonOpenersSegment(source.id);
+  } catch (err) {
+    return failure(err, "The non-openers segment couldn't be created. Please try again.");
+  }
+  const copy = draftCopy(source, {
+    name: `Resend: ${source.name}`,
+    listIds: [],
+    segmentIds: [segmentId],
+    abTest: null,
+  });
   const { campaigns } = await collections();
   await campaigns.insertOne(copy);
 

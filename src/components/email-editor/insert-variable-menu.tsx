@@ -4,12 +4,22 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { MERGE_TAGS } from "@/lib/render";
 import { formatMergeTag, toCustomFieldKey } from "@/lib/templates/merge-tags";
+import { cn } from "@/lib/utils";
 
 const smallInput =
   "block w-full rounded-md border-0 bg-white px-2 py-1.5 font-mono text-xs text-slate-900 ring-1 ring-slate-300 ring-inset placeholder:font-sans placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-600 focus:ring-inset";
 
-/** "Insert variable" button + popover: built-in merge tags, custom fields and an optional fallback. */
-export function InsertVariableMenu({ onInsert }: { onInsert: (text: string) => void }) {
+/**
+ * "Insert variable" button + popover: built-in merge tags, custom fields and an optional fallback.
+ * `compact` shows a small "{ }" trigger with a right-aligned popover, for use beside a field label.
+ */
+export function InsertVariableMenu({
+  onInsert,
+  compact = false,
+}: {
+  onInsert: (text: string) => void;
+  compact?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [field, setField] = useState("");
   const [fallback, setFallback] = useState("");
@@ -72,34 +82,52 @@ export function InsertVariableMenu({ onInsert }: { onInsert: (text: string) => v
         if (open && next && !event.currentTarget.contains(next)) close();
       }}
     >
-      <Button
-        ref={buttonRef}
-        type="button"
-        variant="secondary"
-        size="sm"
-        aria-expanded={open}
-        aria-controls={open ? panelId : undefined}
-        onClick={() => (open ? close() : setOpen(true))}
-      >
-        <span className="font-mono text-xs text-slate-500" aria-hidden>
-          {"{}"}
-        </span>
-        Insert variable
-        <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-slate-400" aria-hidden>
-          <path
-            fillRule="evenodd"
-            d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z"
-            clipRule="evenodd"
-          />
-        </svg>
-      </Button>
+      {compact ? (
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-label="Insert variable"
+          title="Insert variable"
+          aria-expanded={open}
+          aria-controls={open ? panelId : undefined}
+          onClick={() => (open ? close() : setOpen(true))}
+          className="inline-flex h-6 items-center rounded px-1.5 font-mono text-xs font-medium text-indigo-600 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600"
+        >
+          {"{ }"}
+        </button>
+      ) : (
+        <Button
+          ref={buttonRef}
+          type="button"
+          variant="secondary"
+          size="sm"
+          aria-expanded={open}
+          aria-controls={open ? panelId : undefined}
+          onClick={() => (open ? close() : setOpen(true))}
+        >
+          <span className="font-mono text-xs text-slate-500" aria-hidden>
+            {"{}"}
+          </span>
+          Insert variable
+          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-slate-400" aria-hidden>
+            <path
+              fillRule="evenodd"
+              d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </Button>
+      )}
 
       {open ? (
         <div
           id={panelId}
           role="dialog"
           aria-label="Insert variable"
-          className="absolute top-full left-0 z-30 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-lg bg-white p-2 shadow-lg ring-1 ring-slate-200"
+          className={cn(
+            "absolute top-full z-30 mt-1 max-w-[calc(100vw-2rem)] rounded-lg bg-white p-2 text-left shadow-lg ring-1 ring-slate-200",
+            compact ? "right-0 w-64" : "left-0 w-80",
+          )}
         >
           <div className="px-2 pt-1 pb-2">
             <label htmlFor={`${uid}-fallback`} className="block text-xs font-medium text-slate-700">

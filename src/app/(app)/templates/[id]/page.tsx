@@ -68,6 +68,7 @@ export default async function TemplatePage({ params }: Props) {
           subject: template.subject,
           previewText: template.previewText,
           html: template.html,
+          design: template.design ?? null,
         }}
         testRecipient={session.email}
         sender={testSender(settings)}

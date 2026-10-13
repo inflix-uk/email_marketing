@@ -1,9 +1,10 @@
 import { DatabaseNotConfiguredError } from "@/db";
-import { recordOpen } from "@/lib/sending";
+import { isBotUserAgent, recordOpen } from "@/lib/sending";
 
 // Open-tracking pixel. Public (see src/proxy.ts). Always answers with the
 // image, even for unknown ids, database errors or a database that isn't set
-// up yet, so emails never show a broken image.
+// up yet, so emails never show a broken image. Hits from link scanners and
+// bots (by User-Agent, see isBotUserAgent) get the image but aren't counted.
 
 const PIXEL = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
 
@@ -20,10 +21,10 @@ function pixelResponse(): Response {
   });
 }
 
-export async function GET(_request: Request, { params }: { params: Promise<{ sendId: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ sendId: string }> }) {
   try {
     const { sendId } = await params;
-    await recordOpen(sendId);
+    if (!isBotUserAgent(request.headers.get("user-agent"))) await recordOpen(sendId);
   } catch (err) {
     if (!(err instanceof DatabaseNotConfiguredError)) console.error("[tracking] failed to record open", err);
   }

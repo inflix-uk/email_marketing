@@ -5,7 +5,9 @@ import { PageHeader, Stat } from "@/components/ui/layout";
 import { cn, formatNumber, formatPercent } from "@/lib/utils";
 import { Audience } from "./_dashboard/audience";
 import { getDashboardData, STATS_WINDOW_DAYS } from "./_dashboard/data";
+import { deliverabilityTile } from "./_dashboard/deliverability";
 import { GetStarted, type ChecklistStep } from "./_dashboard/get-started";
+import { Grow } from "./_dashboard/grow";
 import { RecentCampaigns } from "./_dashboard/recent-campaigns";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -23,6 +25,7 @@ export default async function DashboardPage() {
   const data = await getDashboardData();
   const { contacts, window } = data;
   const windowLabel = `Last ${STATS_WINDOW_DAYS} days`;
+  const deliverability = deliverabilityTile(window, windowLabel);
 
   const steps: ChecklistStep[] = [
     {
@@ -35,7 +38,7 @@ export default async function DashboardPage() {
     },
     {
       label: "Add contacts",
-      description: "Import a CSV of people who have agreed to hear from you.",
+      description: "Import a CSV of people who have agreed to hear from you, or collect sign-ups with a form.",
       href: "/contacts/import",
       cta: "Import contacts",
       done: contacts.total > 0,
@@ -79,12 +82,15 @@ export default async function DashboardPage() {
         }
       />
 
-      <section aria-label="Key numbers" className="grid grid-cols-2 gap-4 xl:grid-cols-5">
+      <section aria-label="Key numbers" className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
         <Tile
-          className="col-span-2 xl:col-span-1"
           label="Subscribed contacts"
           value={formatNumber(contacts.subscribed)}
-          hint={`of ${formatNumber(contacts.total)} total`}
+          hint={
+            contacts.pending
+              ? `of ${formatNumber(contacts.total)} total · ${formatNumber(contacts.pending)} pending`
+              : `of ${formatNumber(contacts.total)} total`
+          }
         />
         <Tile
           label="Lists"
@@ -106,10 +112,11 @@ export default async function DashboardPage() {
           value={window.sent ? formatPercent(window.clicked, window.sent) : "—"}
           hint={window.sent ? `${formatNumber(window.clicked)} people clicked a link` : `No sends in the ${windowLabel.toLowerCase()}`}
         />
+        <Tile label="Bounce rate" value={deliverability.value} hint={deliverability.hint} />
       </section>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3 lg:items-start">
-        <div className="min-w-0 lg:col-span-2 lg:row-span-2">
+        <div className={cn("min-w-0 lg:col-span-2", showChecklist ? "lg:row-span-3" : "lg:row-span-2")}>
           <RecentCampaigns campaigns={data.recent} />
         </div>
         {showChecklist ? (
@@ -120,6 +127,9 @@ export default async function DashboardPage() {
         ) : null}
         <div className="lg:col-start-3">
           <Audience contacts={contacts} />
+        </div>
+        <div className="lg:col-start-3">
+          <Grow formCount={data.formCount} activeAutomationCount={data.activeAutomationCount} />
         </div>
       </div>
     </>

@@ -49,7 +49,7 @@ export async function findContacts(filters: ContactFilters, requestedPage: numbe
 
   const docs = await contacts
     .find(filter, {
-      projection: { email: 1, firstName: 1, lastName: 1, status: 1, createdAt: 1, listIds: 1 },
+      projection: { email: 1, firstName: 1, lastName: 1, status: 1, createdAt: 1, listIds: 1, tags: 1 },
       sort: { createdAt: -1, email: 1 },
       skip: offset,
       limit: pageSize,
@@ -64,6 +64,7 @@ export async function findContacts(filters: ContactFilters, requestedPage: numbe
     lastName: d.lastName,
     status: d.status,
     createdAt: d.createdAt,
+    tags: [...(d.tags ?? [])].sort(compareNames),
     lists: (d.listIds ?? [])
       .flatMap((id) => (names.has(id) ? [{ id, name: names.get(id)! }] : []))
       .sort((a, b) => compareNames(a.name, b.name)),
@@ -78,6 +79,27 @@ async function listNamesById(ids: string[]): Promise<Map<string, string>> {
   const { lists } = await collections();
   const docs = await lists.find({ _id: { $in: unique } }, { projection: { name: 1 } }).toArray();
   return new Map(docs.map((d) => [d._id, d.name]));
+}
+
+export interface TagOption {
+  tag: string;
+  count: number;
+}
+
+/** Every tag in use with the number of contacts that have it, alphabetically (for the filter and suggestions). */
+export async function getTagOptions(limit = 500): Promise<TagOption[]> {
+  const { contacts } = await collections();
+  const rows = await contacts
+    .aggregate<{ _id: string; count: number }>([
+      { $match: { tags: { $exists: true, $ne: [] } } },
+      { $project: { _id: 0, tags: 1 } },
+      { $unwind: "$tags" },
+      { $group: { _id: "$tags", count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+      { $limit: limit },
+    ])
+    .toArray();
+  return rows.map((r) => ({ tag: r._id, count: r.count }));
 }
 
 /** Custom field names used by the contacts matching the filters (the export's extra columns). */
@@ -98,7 +120,7 @@ export async function exportFieldKeys(filters: ContactFilters): Promise<string[]
 export async function exportContactsCursor(filters: ContactFilters, batchSize = 1000) {
   const { contacts } = await collections();
   return contacts.find(contactFilter(filters), {
-    projection: { _id: 0, email: 1, firstName: 1, lastName: 1, status: 1, createdAt: 1, fields: 1 },
+    projection: { _id: 0, email: 1, firstName: 1, lastName: 1, status: 1, createdAt: 1, fields: 1, tags: 1 },
     sort: { email: 1 },
     batchSize,
   });
@@ -107,7 +129,7 @@ export async function exportContactsCursor(filters: ContactFilters, batchSize = 
 export async function getContact(id: string): Promise<Contact | null> {
   const { contacts } = await collections();
   const doc = await contacts.findOne({ _id: id });
-  return doc ? { ...fromDoc(doc), fields: doc.fields ?? {}, listIds: doc.listIds ?? [] } : null;
+  return doc ? { ...fromDoc(doc), fields: doc.fields ?? {}, listIds: doc.listIds ?? [], tags: doc.tags ?? [] } : null;
 }
 
 export async function findContactIdByEmail(email: string): Promise<string | null> {
@@ -124,6 +146,7 @@ export interface ExistingContact {
   fields: Record<string, string>;
   status: ContactStatus;
   listIds: string[];
+  tags: string[];
 }
 
 /** Look up many contacts by (normalised) email, in chunks. */
@@ -135,7 +158,7 @@ export async function findContactsByEmail(emails: string[]): Promise<Map<string,
     const docs = await contacts
       .find(
         { email: { $in: part } },
-        { projection: { email: 1, firstName: 1, lastName: 1, fields: 1, status: 1, listIds: 1 } },
+        { projection: { email: 1, firstName: 1, lastName: 1, fields: 1, status: 1, listIds: 1, tags: 1 } },
       )
       .toArray();
     for (const d of docs) {
@@ -147,6 +170,7 @@ export async function findContactsByEmail(emails: string[]): Promise<Map<string,
         fields: d.fields ?? {},
         status: d.status,
         listIds: d.listIds ?? [],
+        tags: d.tags ?? [],
       });
     }
   }
@@ -223,12 +247,14 @@ export async function getContactActivity(contactId: string, limit = 100): Promis
 export interface ListCounts {
   total: number;
   subscribed: number;
+  /** Signed up through a double opt-in form, not confirmed yet. */
+  pending: number;
   unsubscribed: number;
   /** Bounced or complained. */
   bounced: number;
 }
 
-const NO_MEMBERS: ListCounts = { total: 0, subscribed: 0, unsubscribed: 0, bounced: 0 };
+const NO_MEMBERS: ListCounts = { total: 0, subscribed: 0, pending: 0, unsubscribed: 0, bounced: 0 };
 
 /** Member counts by status for the given lists, in one aggregation. */
 export async function getListCounts(listIds: string[]): Promise<Map<string, ListCounts>> {
@@ -247,6 +273,7 @@ export async function getListCounts(listIds: string[]): Promise<Map<string, List
           _id: "$listIds",
           total: { $sum: 1 },
           subscribed: countWhere(["subscribed"]),
+          pending: countWhere(["pending"]),
           unsubscribed: countWhere(["unsubscribed"]),
           bounced: countWhere(["bounced", "complained"]),
         },

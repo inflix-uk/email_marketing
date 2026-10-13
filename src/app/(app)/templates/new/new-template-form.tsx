@@ -4,12 +4,12 @@ import { useActionState, useState } from "react";
 import { EmailThumbnail } from "@/components/email-editor";
 import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { Alert, Field, Input } from "@/components/ui/form";
-import { BLANK_STARTER, TEMPLATE_STARTERS } from "@/lib/templates/starters";
+import { BLANK_STARTER, BLANK_VISUAL_STARTER, TEMPLATE_STARTERS } from "@/lib/templates/starters";
 import { cn } from "@/lib/utils";
 import { createTemplate, type CreateTemplateState } from "../actions";
 
 function defaultName(key: string): string {
-  if (key === BLANK_STARTER.key) return "Untitled template";
+  if (key === BLANK_STARTER.key || key === BLANK_VISUAL_STARTER.key) return "Untitled template";
   return TEMPLATE_STARTERS.find((s) => s.key === key)?.name ?? "";
 }
 
@@ -30,13 +30,14 @@ export function NewTemplateForm() {
       <fieldset>
         <legend className="text-base font-semibold text-slate-900">Start from</legend>
         <p className="mt-1 text-sm text-slate-500">
-          Pick a ready-made layout, or start blank. You can change everything afterwards.
+          Pick a ready-made design or a blank one to build in the visual editor, or choose Blank (HTML) to write or
+          paste your own code. You can change everything afterwards.
         </p>
         {state.fieldErrors?.starter ? (
           <p className="mt-2 text-xs text-red-600">{state.fieldErrors.starter[0]}</p>
         ) : null}
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
           {TEMPLATE_STARTERS.map((option) => (
             <label
               key={option.key}
@@ -58,6 +59,9 @@ export function NewTemplateForm() {
               <span className="flex-1 p-3">
                 <span className="block text-sm font-medium text-slate-900">{option.name}</span>
                 <span className="mt-0.5 block text-xs text-slate-500">{option.description}</span>
+                <span className="mt-2 inline-flex rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+                  {option.design ? "Visual editor" : "HTML editor"}
+                </span>
               </span>
               <span
                 className="absolute top-2 right-2 hidden h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-white shadow group-has-checked:flex"

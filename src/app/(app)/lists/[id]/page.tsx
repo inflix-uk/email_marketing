@@ -56,8 +56,9 @@ export default async function ListPage({ params, searchParams }: Props) {
         }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="Subscribed" value={formatNumber(stats.subscribed)} hint="Will receive campaigns" />
+        <Stat label="Pending" value={formatNumber(stats.pending)} hint="Not confirmed yet" />
         <Stat label="Unsubscribed" value={formatNumber(stats.unsubscribed)} />
         <Stat label="Bounced / complained" value={formatNumber(stats.bounced)} />
         <Stat label="Total members" value={formatNumber(stats.total)} />

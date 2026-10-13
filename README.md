@@ -26,6 +26,15 @@ Everything is configured in the app: a setup screen on first run, then the **Set
 - **Campaigns:** pick a template and lists, send yourself a test, then send now or schedule it. Pause, resume or cancel while it sends. Results: sent, failed, opens, clicks, unsubscribes and top links.
 - **Background sending:** a worker process sends at the rate you choose and retries temporary failures. Nobody gets the same campaign twice, even if they are in several of its lists.
 - **Compliance built in:** a personal unsubscribe link in every email, the one-click unsubscribe headers Gmail and Yahoo require, and your postal address in the footer. Unsubscribes are honoured immediately and never undone by an import.
+- **Segments:** saved filters such as "city is London", "has tag vip" or "opened in the last 30 days". A campaign can target lists, segments or both.
+- **Sign-up forms:** a hosted page and an embeddable snippet, with double opt-in (people confirm by email before they are subscribed).
+- **Automations:** welcome emails and drip series that start when someone joins a list, submits a form or gets a tag.
+- **Visual editor:** build emails from blocks (heading, text, image, button, columns) with image uploads; HTML editing is still available.
+- **A/B subject tests** and **resend to non-openers**.
+- **Deliverability:** bounces and spam complaints from your provider mark the contact automatically, a campaign pauses itself if too many emails bounce, and a daily send limit lets you warm up a new domain.
+- **Tags, bulk actions and a suppression list** for contacts.
+- **Team accounts**, forgot-password links, a limit on password guesses, and database backups.
+- **API** with keys for adding contacts from your website.
 - **Test mode:** until you connect an email provider, emails are saved as HTML files in `data/outbox/` instead of being sent, so you can try everything safely.
 
 ## Quick start
@@ -169,7 +178,7 @@ mail.yourdomain.com {
 | `MONGODB_URI` | Connection string, overrides `data/config.json` (the setup screen then skips the database step). |
 | `AUTH_SECRET` | Secret that signs logins and unsubscribe/tracking links. Without it one is generated and stored in the database. Changing it signs everyone out and breaks links in emails already sent. |
 
-**To update:** `git pull && npm ci && npm run build`, then restart. **Backups:** use Atlas backups or `mongodump`. Run only one worker per database.
+**To update:** `git pull && npm ci && npm run build`, then restart. **Backups:** `npm run db:backup` (or Atlas backups). Run only one worker per database.
 
 ## Scripts
 
@@ -181,6 +190,8 @@ mail.yourdomain.com {
 | `npm run worker` | Worker only; add `-- --once` to send what's due and exit |
 | `npm run db:seed` | Demo data into an empty database (`-- --reset` deletes contacts, lists, templates and campaigns first) |
 | `npm run mongo:local` | Local MongoDB for offline development |
+| `npm run db:backup` / `npm run db:restore -- <folder> --yes` | Back up the database to `data/backups/` / restore it (`--drop` to overwrite) |
+| `npm run user:reset-password -- you@example.com` | Set a new random password from the terminal |
 | `npm test` | Unit tests (`src/**/*.test.ts`, Node's test runner) |
 | `npm run typecheck` / `npm run lint` | TypeScript and ESLint |
 
@@ -221,11 +232,13 @@ Developer conventions are in [AGENTS.md](AGENTS.md).
 - **Emails go to spam.** Check SPF, DKIM and DMARC (Gmail → ⋮ → Show original), send from your verified domain, warm up slowly.
 - **Links point to localhost.** Set the App URL in Settings → Sending to your public https address.
 
+## Bounce and complaint notifications
+
+In **Settings → Deliverability**, choose your provider and copy the webhook address shown. Add it in the provider's dashboard (Amazon SES: an SNS topic for bounces and complaints; Resend, Brevo, Mailgun: a webhook). From then on, addresses that bounce or report spam are marked and never emailed again.
+
 ## Roadmap
 
-- **Segments** by field values, engagement or signup date, not just lists.
-- **Automations:** welcome series and drip sequences.
-- **A/B tests** of subject lines and content.
-- **Multiple users** with roles.
-- **Bounce and complaint webhooks** (SES/SNS, Resend, Brevo) to update contacts automatically.
-- **Signup forms** with double opt-in.
+- **Multiple companies / brands** in one install, each with its own contacts and sender.
+- **Roles** for team accounts (today every account is an admin) and two-factor sign-in.
+- **Outgoing webhooks** and more API endpoints.
+- **Audit log** of who changed what.

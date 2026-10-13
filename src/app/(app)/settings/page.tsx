@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { requireSession } from "@/lib/auth";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
-import { getSettings, isDevMailer } from "@/lib/settings";
-import { AccountForm, EmailProviderForm, SenderForm, SendingForm, TestEmailForm } from "./forms";
+import { getSettings, getWebhookSecret, isDevMailer } from "@/lib/settings";
+import { AccountForm, DeliverabilityForm, EmailProviderForm, SenderForm, SendingForm, TestEmailForm } from "./forms";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -23,13 +24,26 @@ function Dot({ className }: { className: string }) {
 
 export default async function SettingsPage() {
   const session = await requireSession();
-  const settings = await getSettings();
+  const [settings, webhookToken] = await Promise.all([getSettings(), getWebhookSecret()]);
   const { smtp } = settings;
   const testMode = isDevMailer(settings);
 
   return (
     <div className="max-w-3xl">
-      <PageHeader title="Settings" description="Changes apply straight away - no restart needed." />
+      <PageHeader
+        title="Settings"
+        description="Changes apply straight away - no restart needed."
+        actions={
+          <>
+            <ButtonLink href="/settings/team" variant="secondary" size="sm">
+              Team
+            </ButtonLink>
+            <ButtonLink href="/settings/api" variant="secondary" size="sm">
+              API keys
+            </ButtonLink>
+          </>
+        }
+      />
 
       <div className="space-y-6">
         <Section
@@ -73,6 +87,15 @@ export default async function SettingsPage() {
 
         <Section title="Sending">
           <SendingForm initial={{ appUrl: settings.appUrl, sendRatePerSecond: settings.sendRatePerSecond }} />
+        </Section>
+
+        <Section title="Deliverability" description="Protect your sender reputation.">
+          <DeliverabilityForm
+            initial={{ dailySendLimit: settings.dailySendLimit, bouncePauseRate: settings.bouncePauseRate }}
+            smtpHost={smtp.host}
+            webhookBase={`${settings.appUrl.replace(/\/+$/, "")}/api/webhooks/`}
+            webhookToken={webhookToken}
+          />
         </Section>
 
         <Section

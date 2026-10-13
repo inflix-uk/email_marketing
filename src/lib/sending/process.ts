@@ -7,20 +7,32 @@
 //   immediately before each send;
 // - survive crashes: sends left in "sending" by a dead process are re-queued;
 // - respect the provider's rate limit (Settings > sending speed, re-read
-//   every batch so changes apply without a restart).
+//   every batch so changes apply without a restart) and the daily send limit
+//   (Settings > Deliverability): at the limit the queue simply waits for the
+//   next UTC day;
+// - A/B tests: the winner is stored once with a conditional update, so every
+//   remaining recipient gets the same subject (see ./ab);
+// - mailboxes that reject the address outright are recorded as hard bounces.
+//
+// Automation emails are sends too, but they are sent (and recovered) by
+// src/lib/automations - nothing here touches sends with kind "automation".
 //
 // Run ONE worker process per database: stuck-send recovery assumes no other
 // process is mid-send.
 
 import type { Filter } from "mongodb";
 import { collections } from "@/db";
-import type { CampaignDoc, SendDoc } from "@/db/schema";
+import type { AbTest, CampaignDoc, SendDoc } from "@/db/schema";
 import { classifySendError, sendEmail, type OutgoingEmail, type SendResult } from "@/lib/mailer";
 import { getSettings } from "@/lib/settings";
 import { getLinkContext } from "@/lib/tokens";
+import { needsWinner, pickWinner, subjectForVariant, type Variant } from "./ab";
+import { mailboxRejection, recordBounce } from "./bounces";
 import { CampaignError } from "./errors";
 import { buildCampaignEmail, type CampaignBuildContext, type EmailContent } from "./prepare";
 import { queueCampaign, queueLockFree } from "./queue";
+import { remainingDailyQuota } from "./quota";
+import { getVariantStats } from "./stats";
 
 /** A "sending" send older than this belongs to a crashed process. */
 export const STUCK_SEND_MS = 5 * 60_000;
@@ -131,6 +143,7 @@ export async function recoverStuckSends(
   const now = new Date();
   const filter: Filter<SendDoc> = {
     status: "sending",
+    kind: { $ne: "automation" },
     updatedAt: { $lt: new Date(now.getTime() - olderThanMs) },
     ...scopeFilter<SendDoc>(opts.campaignIds),
   };
@@ -227,6 +240,32 @@ export async function finalizeCampaigns(
 }
 
 // ---------------------------------------------------------------------------
+// A/B test winner
+// ---------------------------------------------------------------------------
+
+/**
+ * Pick the winner of a campaign's A/B test by unique open rate (a tie, or no
+ * data, goes to "A") and store it - once: the update only applies while
+ * `abTest.winner` is still null, so concurrent callers and later batches all
+ * end up with the same stored winner. Returns it, and whether this call made
+ * the decision. Campaigns without a test answer "A".
+ */
+export async function decideAbWinner(campaignId: string): Promise<{ winner: Variant; decided: boolean }> {
+  const { campaigns } = await collections();
+  const stats = await getVariantStats(campaignId);
+  if (!stats) return { winner: "A", decided: false };
+  const winner = pickWinner(stats.A, stats.B);
+  const now = new Date();
+  const filter: Filter<CampaignDoc> = { _id: campaignId, abTest: { $type: "object" }, "abTest.winner": null };
+  const res = await campaigns.updateOne(filter, {
+    $set: { "abTest.winner": winner, "abTest.decidedAt": now, updatedAt: now },
+  });
+  if (res.modifiedCount > 0) return { winner, decided: true };
+  const current = await campaigns.findOne({ _id: campaignId }, { projection: { abTest: 1 } });
+  return { winner: current?.abTest?.winner === "B" ? "B" : "A", decided: false };
+}
+
+// ---------------------------------------------------------------------------
 // Sending
 // ---------------------------------------------------------------------------
 
@@ -255,11 +294,17 @@ export interface BatchResult {
   errors: number;
   /** Campaigns that had sends processed. */
   campaignIds: string[];
+  /** Emails were due but today's send limit (Settings > Deliverability) is used up. */
+  dailyLimitReached: boolean;
+  /** A/B tests whose winner was picked in this batch. */
+  abDecided: { campaignId: string; winner: Variant }[];
 }
 
 type Outcome = "sent" | "failed" | "retried" | "skipped" | "errors" | "config" | "none";
 
-type CampaignContent = EmailContent & { id: string };
+type CampaignContent = EmailContent & { id: string; abTest: AbTest | null };
+
+type Candidate = Pick<SendDoc, "_id" | "campaignId" | "variant">;
 
 export async function processBatch(opts: ProcessBatchOptions = {}): Promise<BatchResult> {
   const result: BatchResult = {
@@ -271,6 +316,8 @@ export async function processBatch(opts: ProcessBatchOptions = {}): Promise<Batc
     configError: null,
     errors: 0,
     campaignIds: [],
+    dailyLimitReached: false,
+    abDecided: [],
   };
   if (opts.campaignIds && opts.campaignIds.length === 0) return result;
   await flushUnrecorded();
@@ -287,7 +334,7 @@ export async function processBatch(opts: ProcessBatchOptions = {}): Promise<Batc
   if (opts.campaignIds) campaignFilter._id = { $in: opts.campaignIds };
   const active = await campaigns
     .find(campaignFilter, {
-      projection: { _id: 1, subject: 1, previewText: 1, html: 1, fromName: 1, fromEmail: 1, replyTo: 1 },
+      projection: { _id: 1, subject: 1, previewText: 1, html: 1, fromName: 1, fromEmail: 1, replyTo: 1, abTest: 1 },
     })
     .toArray();
   if (active.length === 0) return result;
@@ -302,20 +349,39 @@ export async function processBatch(opts: ProcessBatchOptions = {}): Promise<Batc
         fromName: c.fromName,
         fromEmail: c.fromEmail,
         replyTo: c.replyTo,
+        abTest: c.abTest ?? null,
       },
     ]),
   );
 
-  const candidates = await sends
+  let candidates: Candidate[] = await sends
     .find(
       { status: "queued", nextAttemptAt: { $lte: new Date() }, campaignId: { $in: [...content.keys()] } },
-      { projection: { _id: 1, campaignId: 1 } },
+      { projection: { _id: 1, campaignId: 1, variant: 1 } },
     )
     .sort({ nextAttemptAt: 1, _id: 1 })
     .limit(limit)
     .toArray();
-  result.picked = candidates.length;
   if (candidates.length === 0) return result;
+
+  // Daily send limit: send only what is left of today's allowance. At the
+  // limit nothing is claimed - the queue stays as it is until tomorrow (UTC).
+  const quota = await remainingDailyQuota();
+  if (quota <= 0) {
+    result.dailyLimitReached = true;
+    return result;
+  }
+  if (candidates.length > quota) candidates = candidates.slice(0, quota);
+  result.picked = candidates.length;
+
+  // A/B tests: the first held-back (non-test) send has come due - pick the winner now.
+  for (const item of candidates) {
+    const campaign = content.get(item.campaignId);
+    if (!campaign || !needsWinner(campaign.abTest, item.variant)) continue;
+    const { winner, decided } = await decideAbWinner(campaign.id);
+    campaign.abTest = { ...campaign.abTest!, winner };
+    if (decided) result.abDecided.push({ campaignId: campaign.id, winner });
+  }
 
   // Signed-link context + footer address, once per batch.
   const build: CampaignBuildContext = { links: await getLinkContext(), companyAddress: settings.companyAddress };
@@ -333,7 +399,7 @@ export async function processBatch(opts: ProcessBatchOptions = {}): Promise<Batc
       if (!item) return;
       const campaign = content.get(item.campaignId);
       if (!campaign || halted.has(campaign.id)) continue;
-      const outcome = await processOne(item._id, campaign, build, pacer, stop, {
+      const outcome = await processOne(item, campaign, build, pacer, stop, {
         onConfigError: (message) => {
           result.configError ??= message;
         },
@@ -353,13 +419,14 @@ export async function processBatch(opts: ProcessBatchOptions = {}): Promise<Batc
 
 /** Claim, check, send and record one email. Never throws. */
 async function processOne(
-  sendId: string,
+  item: Candidate,
   campaign: CampaignContent,
   build: CampaignBuildContext,
   pacer: Pacer,
   stop: () => boolean,
   events: { onConfigError: (message: string) => void; onCampaignHalted: (campaignId: string) => void },
 ): Promise<Outcome> {
+  const sendId = item._id;
   let claimed: Pick<SendDoc, "attempts" | "contactId"> | null = null;
   let delivered = false;
   try {
@@ -385,10 +452,11 @@ async function processOne(
       return "skipped";
     }
 
-    // 3. Build the message.
+    // 3. Build the message (A/B tests: with this send's subject line).
     let message: OutgoingEmail;
     try {
-      message = buildCampaignEmail(campaign, { ...contact, fields: contact.fields ?? {} }, sendId, build);
+      const subject = subjectForVariant(campaign.subject, campaign.abTest, item.variant);
+      message = buildCampaignEmail({ ...campaign, subject }, { ...contact, fields: contact.fields ?? {} }, sendId, build);
     } catch (err) {
       await finish(sendId, { status: "failed", attempts, lastError: `Could not build the email: ${errorMessage(err)}` });
       return "failed";
@@ -425,6 +493,13 @@ async function processOne(
       }
       if (permanent || attempts >= MAX_ATTEMPTS) {
         await finish(sendId, { status: "failed", attempts, lastError: reason });
+        // "No such mailbox": a hard bounce - stop emailing this address.
+        const bounce = permanent ? mailboxRejection(err) : null;
+        if (bounce) {
+          await recordBounce({ email: contact.email, reason: bounce, sendId }).catch((e) =>
+            console.error(`[sending] could not record the bounce of email ${sendId}:`, e),
+          );
+        }
         return "failed";
       }
       await finish(sendId, {
@@ -438,7 +513,12 @@ async function processOne(
 
     // 7. Record. From here on the email is out: never re-queue it.
     delivered = true;
-    await markSent(sendId, { messageId: sent.messageId, sentAt: new Date(), email: contact.email, attempts });
+    const sentAt = new Date();
+    await markSent(sendId, { messageId: sent.messageId, sentAt, email: contact.email, attempts });
+    // Engagement timestamp for segments ("not emailed in 30 days"); best effort.
+    await contacts
+      .updateOne({ _id: claimed.contactId }, { $set: { lastEmailedAt: sentAt, updatedAt: sentAt } })
+      .catch(() => {});
     return "sent";
   } catch (err) {
     console.error(`[sending] unexpected error on email ${sendId}:`, err);

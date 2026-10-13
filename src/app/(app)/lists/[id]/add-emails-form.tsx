@@ -27,8 +27,8 @@ export function AddEmailsForm({ action }: { action: (state: AddEmailsState, form
           </p>
           {result.notSubscribed > 0 ? (
             <p className="mt-1">
-              {plural(result.notSubscribed, "contact is", "contacts are")} unsubscribed or bounced and won&apos;t receive
-              campaigns.
+              {plural(result.notSubscribed, "contact is", "contacts are")} pending, unsubscribed or bounced and
+              won&apos;t receive campaigns.
             </p>
           ) : null}
         </Alert>

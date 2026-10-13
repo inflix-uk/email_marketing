@@ -48,3 +48,17 @@ Stack: Next.js 16 App Router + React 19 + Tailwind v4, MongoDB (official `mongod
 - Emails are stored lower-cased: `normalizeEmail` / `isValidEmail` from `@/lib/utils`.
 - Never re-subscribe a contact whose status is `unsubscribed`/`bounced`/`complained` as a side effect (imports, list adds). Only an explicit manual edit may do that.
 - Code under `src/lib/**` and `src/db/**` also runs in the worker via tsx: don't import `server-only` or `next/*` there (except `lib/auth.ts`, `lib/setup.ts`). Scripts run as CommonJS: no top-level `await`.
+
+## Feature areas added after the MVP
+- **Segments** (`src/lib/segments`, `/segments`): saved live filters. `audienceFilter({ listIds, segmentIds })` is the single definition of a campaign audience (lists OR segments); senders add `status: "subscribed"`.
+- **Sign-up forms + double opt-in** (`src/lib/forms`, `/forms`, public `/f/[formId]`, `/c/[token]`, `POST /api/subscribe/[formId]`). Unconfirmed sign-ups are contacts with status `pending` and are never emailed.
+- **Public API** (`src/lib/api`, `/api/v1/*`, keys on `/settings/api`): `Authorization: Bearer <key>`; only a sha256 of the key is stored.
+- **Automations** (`src/lib/automations`, `/automations`): `triggerAutomations(event)` after single-contact changes (never for imports or bulk actions), `processDueAutomations()` called by the worker. Automation emails are `sends` with `kind: "automation"` and `campaignId = automationSendKey(...)`.
+- **Deliverability** (`src/lib/sending`): `recordBounce` / `recordComplaint`, provider webhooks at `/api/webhooks/[provider]?token=...`, auto-pause on high bounce rate, `remainingDailyQuota()`, A/B subject tests (`campaign.abTest`, `send.variant`).
+- **Visual editor** (`src/components/email-editor`, `src/lib/email-design`): a design is JSON; the server re-renders the HTML from it on save (`parseDesign` -> `renderDesign` + `serializeDesign`). Images live in GridFS bucket `uploads`, served by the public `/api/files/[id]`.
+- **Accounts** (`src/lib/auth.ts`, `/settings/team`, `/forgot-password`, `/reset-password`): sessions carry `sessionVersion`; bumping it signs the user out everywhere. `rateLimit(key, { limit, windowSeconds })` in `src/lib/rate-limit.ts` protects login and public endpoints.
+- **Suppression is final**: a contact with `source: "suppression"` is never re-subscribed by forms, confirmation links, imports or the API - only by a manual re-subscribe.
+
+## More commands
+- `npm run db:backup` / `npm run db:restore -- <folder> [--drop] --yes` - database backup to `data/backups/`.
+- `npm run user:reset-password -- someone@example.com` - set a new random password from the terminal.

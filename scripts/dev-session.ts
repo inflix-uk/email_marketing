@@ -8,7 +8,7 @@ async function main() {
   const { users } = await collections();
   const user = await users.findOne({}, { sort: { createdAt: 1 } });
   if (!user) throw new Error("No admin account yet - finish /setup first.");
-  console.log(`${SESSION_COOKIE}=${await createSessionToken(user.email)}`);
+  console.log(`${SESSION_COOKIE}=${await createSessionToken(user.email, user.sessionVersion ?? 0)}`);
   await closeDb();
 }
 

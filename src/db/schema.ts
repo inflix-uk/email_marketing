@@ -114,6 +114,8 @@ export interface CampaignDoc {
   abTest?: AbTest | null;
   /** Why the system paused this campaign (e.g. high bounce rate). Cleared on resume. */
   pauseReason?: string | null;
+  /** Set when a human resumed after an automatic bounce pause, so it is not paused again straight away. */
+  bouncePauseIgnored?: boolean;
   status: CampaignStatus;
   scheduledAt: Date | null;
   startedAt: Date | null;

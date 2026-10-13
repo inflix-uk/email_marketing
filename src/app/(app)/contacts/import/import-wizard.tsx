@@ -66,6 +66,7 @@ function ImportWizard({
   const [listId, setListId] = useState(defaultListId ?? lists[0]?.id ?? "");
   const [newListName, setNewListName] = useState("");
   const [updateExisting, setUpdateExisting] = useState(true);
+  const [tags, setTags] = useState("");
 
   if (state.result) return <ImportResult result={state.result} onReset={onReset} />;
 
@@ -149,13 +150,14 @@ function ImportWizard({
     formData.set("listId", listId);
     formData.set("newListName", newListName);
     if (updateExisting) formData.set("updateExisting", "on");
+    formData.set("tags", tags);
     startTransition(() => dispatch(formData));
   }
 
   return (
     <form onSubmit={onSubmit} className="space-y-6">
       <Card>
-        <CardHeader title="1. Choose a CSV file" description="The first row must contain column names, e.g. Email, First name, Company." />
+        <CardHeader title="1. Choose a CSV file" description="The first row must contain column names, e.g. Email, First name, Company, Tags." />
         <CardBody>
           {file ? (
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -207,7 +209,7 @@ function ImportWizard({
           <Card>
             <CardHeader
               title="2. Match your columns"
-              description="We guessed what each column contains from its name - check and adjust."
+              description="We guessed what each column contains from its name - check and adjust. A Tags column can hold several tags separated by commas or semicolons."
             />
             <Table>
               <thead className="bg-slate-50">
@@ -392,6 +394,24 @@ function ImportWizard({
                 </div>
               </fieldset>
 
+              <div className="space-y-1.5">
+                <label htmlFor="import-tags" className="block text-sm font-medium text-slate-700">
+                  Add this tag to every imported contact
+                </label>
+                <Input
+                  id="import-tags"
+                  value={tags}
+                  onChange={(e) => setTags(e.target.value)}
+                  placeholder="Optional, e.g. webinar-2026"
+                  maxLength={200}
+                  autoComplete="off"
+                  className="sm:max-w-xs"
+                />
+                <p className="text-xs text-slate-500">
+                  Tags are added to new and existing contacts. An import never removes a tag.
+                </p>
+              </div>
+
               <div className="flex items-start gap-3">
                 <input
                   id="update-existing"
@@ -407,7 +427,7 @@ function ImportWizard({
                   </label>
                   <p id="update-existing-hint" className="mt-0.5 text-xs text-slate-500">
                     Empty cells never erase existing data. An import never changes anyone&apos;s subscription status -
-                    unsubscribed contacts stay unsubscribed.
+                    unsubscribed and suppressed contacts stay unsubscribed.
                   </p>
                 </div>
               </div>
@@ -463,6 +483,13 @@ function ImportResult({ result, onReset }: { result: ImportSummary; onReset: () 
         {result.list ? (
           <Stat label={`Added to ${result.list.name}`} value={formatNumber(result.addedToList)} hint="Others were already members" />
         ) : null}
+        {result.usedTags ? (
+          <Stat
+            label="Existing contacts tagged"
+            value={formatNumber(result.tagged)}
+            hint={result.tags.length > 0 ? `New contacts get ${result.tags.join(", ")} too` : "Received a new tag"}
+          />
+        ) : null}
         <Stat label="Invalid rows" value={formatNumber(result.invalidCount)} hint="Skipped - no valid email" />
         <Stat label="Duplicates merged" value={formatNumber(result.duplicateCount)} hint="Same email repeated in the file" />
       </div>
@@ -470,7 +497,7 @@ function ImportResult({ result, onReset }: { result: ImportSummary; onReset: () 
       {result.notSubscribed > 0 ? (
         <Alert tone="info">
           {formatNumber(result.notSubscribed)} existing {result.notSubscribed === 1 ? "contact is" : "contacts are"}{" "}
-          unsubscribed, bounced or marked as spam. {result.notSubscribed === 1 ? "It was" : "They were"} left that way and
+          pending, unsubscribed, bounced or marked as spam. {result.notSubscribed === 1 ? "It was" : "They were"} left that way and
           won&apos;t receive campaigns.
         </Alert>
       ) : null}

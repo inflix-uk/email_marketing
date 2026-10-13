@@ -13,7 +13,10 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "db:seed": "tsx src/db/seed.ts",
-    "mongo:local": "tsx scripts/local-mongo.ts"
+    "mongo:local": "tsx scripts/local-mongo.ts",
+    "db:backup": "tsx scripts/backup.ts",
+    "db:restore": "tsx scripts/restore.ts",
+    "user:reset-password": "tsx scripts/reset-password.ts"
   },
   "dependencies": {
     "jose": "^6.2.12",

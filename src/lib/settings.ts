@@ -25,6 +25,10 @@ export interface AppSettings {
   companyAddress: string;
   /** Max emails the worker sends per second. */
   sendRatePerSecond: number;
+  /** Max emails per calendar day (UTC) across campaigns + automations. 0 = no limit. Use it to warm up a new domain. */
+  dailySendLimit: number;
+  /** Auto-pause a sending campaign when its bounce rate (%) goes above this. 0 = off. */
+  bouncePauseRate: number;
   smtp: SmtpSettings;
 }
 
@@ -32,6 +36,8 @@ export interface SettingsDoc extends Partial<AppSettings> {
   _id: "app";
   /** Signs sessions and public links. Generated on first use. */
   authSecret?: string;
+  /** Secret in bounce/complaint webhook URLs. Generated on first use. */
+  webhookSecret?: string;
   updatedAt?: Date;
 }
 
@@ -42,6 +48,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   replyTo: "",
   companyAddress: "",
   sendRatePerSecond: 5,
+  dailySendLimit: 0,
+  bouncePauseRate: 8,
   smtp: { host: "", port: 587, secure: false, user: "", pass: "" },
 };
 
@@ -61,6 +69,8 @@ function merge(doc: SettingsDoc | null): AppSettings {
       replyTo: doc?.replyTo,
       companyAddress: doc?.companyAddress,
       sendRatePerSecond: doc?.sendRatePerSecond,
+      dailySendLimit: doc?.dailySendLimit,
+      bouncePauseRate: doc?.bouncePauseRate,
     }),
     smtp: { ...DEFAULT_SETTINGS.smtp, ...stripUndefined(doc?.smtp ?? {}) },
   };
@@ -125,4 +135,22 @@ export async function getAuthSecret(): Promise<string> {
   if (!doc?.authSecret) throw new Error("Could not create the auth secret");
   globalForSettings.authSecret = doc.authSecret;
   return doc.authSecret;
+}
+
+/** Secret token that provider webhooks (bounces/complaints) must include. Generated once and stored. */
+export async function getWebhookSecret(): Promise<string> {
+  const { settings } = await collections();
+  let doc = await settings.findOne({ _id: "app" }, { projection: { webhookSecret: 1 } });
+  if (!doc?.webhookSecret) {
+    await settings
+      .updateOne(
+        { _id: "app", webhookSecret: { $exists: false } },
+        { $set: { webhookSecret: randomBytes(24).toString("hex") } },
+        { upsert: true },
+      )
+      .catch(() => {});
+    doc = await settings.findOne({ _id: "app" }, { projection: { webhookSecret: 1 } });
+  }
+  if (!doc?.webhookSecret) throw new Error("Could not create the webhook secret");
+  return doc.webhookSecret;
 }

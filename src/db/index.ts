@@ -2,10 +2,16 @@ import { MongoClient, type Db } from "mongodb";
 import { getMongoUri } from "@/lib/config";
 import type { SettingsDoc } from "@/lib/settings";
 import type {
+  ApiKeyDoc,
+  AutomationDoc,
   CampaignDoc,
   ClickDoc,
   ContactDoc,
+  EnrollmentDoc,
+  FormDoc,
   ListDoc,
+  RateLimitDoc,
+  SegmentDoc,
   SendDoc,
   TemplateDoc,
   UserDoc,
@@ -70,6 +76,12 @@ export async function collections() {
     clicks: db.collection<ClickDoc>("clicks"),
     users: db.collection<UserDoc>("users"),
     settings: db.collection<SettingsDoc>("settings"),
+    segments: db.collection<SegmentDoc>("segments"),
+    forms: db.collection<FormDoc>("forms"),
+    automations: db.collection<AutomationDoc>("automations"),
+    enrollments: db.collection<EnrollmentDoc>("enrollments"),
+    apiKeys: db.collection<ApiKeyDoc>("apiKeys"),
+    rateLimits: db.collection<RateLimitDoc>("rateLimits"),
   };
 }
 
@@ -82,6 +94,7 @@ async function ensureIndexes(db: Db): Promise<void> {
       { key: { status: 1 } },
       { key: { listIds: 1, status: 1 } },
       { key: { createdAt: -1 } },
+      { key: { tags: 1 } },
     ]),
     db.collection("lists").createIndexes([{ key: { createdAt: -1 } }]),
     db.collection("templates").createIndexes([{ key: { updatedAt: -1 } }]),
@@ -97,6 +110,14 @@ async function ensureIndexes(db: Db): Promise<void> {
     ]),
     db.collection("clicks").createIndexes([{ key: { campaignId: 1 } }, { key: { sendId: 1 } }]),
     db.collection("users").createIndexes([{ key: { email: 1 }, unique: true }]),
+    db.collection("sends").createIndexes([{ key: { email: 1, sentAt: -1 } }, { key: { messageId: 1 }, sparse: true }]),
+    db.collection("enrollments").createIndexes([
+      { key: { automationId: 1, contactId: 1 }, unique: true },
+      { key: { status: 1, nextRunAt: 1 } },
+    ]),
+    db.collection("automations").createIndexes([{ key: { status: 1 } }]),
+    db.collection("apiKeys").createIndexes([{ key: { keyHash: 1 }, unique: true }]),
+    db.collection("rateLimits").createIndexes([{ key: { expiresAt: 1 }, expireAfterSeconds: 0 }]),
   ]);
 }
 

@@ -134,6 +134,7 @@ export function Badge({ tone = "gray", children }: { tone?: Tone; children: Reac
 const statusTones: Record<string, Tone> = {
   // contacts
   subscribed: "green",
+  pending: "yellow",
   unsubscribed: "gray",
   bounced: "red",
   complained: "red",
@@ -148,6 +149,11 @@ const statusTones: Record<string, Tone> = {
   queued: "gray",
   failed: "red",
   skipped: "yellow",
+  // automations / forms
+  active: "green",
+  inactive: "gray",
+  completed: "gray",
+  stopped: "gray",
 };
 
 /** Colour-coded badge for any contact / campaign / send status. */

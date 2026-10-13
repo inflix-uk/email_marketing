@@ -5,9 +5,24 @@ import { SESSION_COOKIE } from "@/lib/session";
 // session cookie are sent to /login. The (app) layout and every server
 // action / route handler verify the session for real via requireSession().
 
-// Reachable without logging in: setup + login, and the public links inside
-// emails (unsubscribe page, one-click unsubscribe, open/click tracking).
-const PUBLIC_PREFIXES = ["/setup", "/login", "/u/", "/api/unsubscribe/", "/api/t/"];
+// Reachable without logging in: setup + login + password reset, the public
+// links inside emails (unsubscribe, tracking, hosted images), sign-up forms
+// and their confirmation links, provider webhooks, and the key-authenticated API.
+const PUBLIC_PREFIXES = [
+  "/setup",
+  "/login",
+  "/forgot-password",
+  "/reset-password",
+  "/u/",
+  "/f/",
+  "/c/",
+  "/api/unsubscribe/",
+  "/api/t/",
+  "/api/files/",
+  "/api/subscribe/",
+  "/api/webhooks/",
+  "/api/v1/",
+];
 
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;

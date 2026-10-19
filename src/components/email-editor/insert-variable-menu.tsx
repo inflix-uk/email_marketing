@@ -7,7 +7,7 @@ import { formatMergeTag, toCustomFieldKey } from "@/lib/templates/merge-tags";
 import { cn } from "@/lib/utils";
 
 const smallInput =
-  "block w-full rounded-md border-0 bg-white px-2 py-1.5 font-mono text-xs text-slate-900 ring-1 ring-slate-300 ring-inset placeholder:font-sans placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-600 focus:ring-inset";
+  "block w-full rounded-md border-0 bg-white px-2 py-1.5 text-xs text-slate-900 ring-1 ring-slate-300 ring-inset placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-600 focus:ring-inset";
 
 /**
  * "Insert variable" button + popover: built-in merge tags, custom fields and an optional fallback.
@@ -86,14 +86,13 @@ export function InsertVariableMenu({
         <button
           ref={buttonRef}
           type="button"
-          aria-label="Insert variable"
-          title="Insert variable"
+          title="Insert the contact's name or another detail"
           aria-expanded={open}
           aria-controls={open ? panelId : undefined}
           onClick={() => (open ? close() : setOpen(true))}
-          className="inline-flex h-6 items-center rounded px-1.5 font-mono text-xs font-medium text-indigo-600 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600"
+          className="inline-flex h-6 items-center rounded px-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600"
         >
-          {"{ }"}
+          Personalise
         </button>
       ) : (
         <Button
@@ -105,10 +104,7 @@ export function InsertVariableMenu({
           aria-controls={open ? panelId : undefined}
           onClick={() => (open ? close() : setOpen(true))}
         >
-          <span className="font-mono text-xs text-slate-500" aria-hidden>
-            {"{}"}
-          </span>
-          Insert variable
+          Personalise
           <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-slate-400" aria-hidden>
             <path
               fillRule="evenodd"
@@ -123,7 +119,7 @@ export function InsertVariableMenu({
         <div
           id={panelId}
           role="dialog"
-          aria-label="Insert variable"
+          aria-label="Personalise"
           className={cn(
             "absolute top-full z-30 mt-1 max-w-[calc(100vw-2rem)] rounded-lg bg-white p-2 text-left shadow-lg ring-1 ring-slate-200",
             compact ? "right-0 w-64" : "left-0 w-80",
@@ -131,7 +127,7 @@ export function InsertVariableMenu({
         >
           <div className="px-2 pt-1 pb-2">
             <label htmlFor={`${uid}-fallback`} className="block text-xs font-medium text-slate-700">
-              Fallback if empty <span className="font-normal text-slate-400">(optional)</span>
+              If missing, show <span className="font-normal text-slate-400">(optional)</span>
             </label>
             <input
               id={`${uid}-fallback`}
@@ -153,8 +149,7 @@ export function InsertVariableMenu({
                   onClick={() => insert(item.tag)}
                   className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 focus-visible:bg-indigo-50 focus-visible:text-indigo-700 focus-visible:outline-none"
                 >
-                  <span>{item.label}</span>
-                  <code className="font-mono text-xs text-slate-500">{`{{${item.tag}}}`}</code>
+                  {item.label}
                 </button>
               </li>
             ))}
@@ -162,32 +157,25 @@ export function InsertVariableMenu({
 
           <div className="mt-1 border-t border-slate-100 px-2 pt-2 pb-1">
             <label htmlFor={`${uid}-field`} className="block text-xs font-medium text-slate-700">
-              Custom field
+              Other field
             </label>
             <div className="mt-1 flex gap-2">
               <div className="flex min-w-0 flex-1 items-center rounded-md bg-white ring-1 ring-slate-300 ring-inset focus-within:ring-2 focus-within:ring-indigo-600">
-                <span className="pl-2 font-mono text-xs text-slate-400" aria-hidden>
-                  fields.
-                </span>
                 <input
                   id={`${uid}-field`}
                   value={field}
                   onChange={(e) => setField(e.target.value)}
                   onKeyDown={(e) => preventSubmit(e, insertCustomField)}
-                  placeholder="company"
+                  placeholder="e.g. company"
                   autoComplete="off"
                   spellCheck={false}
-                  aria-describedby={`${uid}-field-hint`}
-                  className="min-w-0 flex-1 border-0 bg-transparent py-1.5 pr-2 pl-0.5 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus:ring-0 focus:outline-none"
+                  className="min-w-0 flex-1 border-0 bg-transparent px-2 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:ring-0 focus:outline-none"
                 />
               </div>
               <Button type="button" size="sm" variant="secondary" onClick={insertCustomField} disabled={!fieldKey}>
                 Insert
               </Button>
             </div>
-            <p id={`${uid}-field-hint`} className="mt-1 text-xs text-slate-500">
-              Any column imported with your contacts, e.g. company or city.
-            </p>
           </div>
         </div>
       ) : null}

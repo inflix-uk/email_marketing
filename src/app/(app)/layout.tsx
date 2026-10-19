@@ -20,13 +20,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="min-w-0 flex-1">
         {devMailer ? (
           <div className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-900">
-            <strong>Test mode:</strong> emails are saved to <code className="font-mono">data/outbox/</code> instead of being sent.{" "}
+            Email sending isn&apos;t set up yet, so no emails will go out.{" "}
             <Link href="/settings" className="font-medium underline">
-              Connect an email provider
+              Set it up
             </Link>
           </div>
         ) : null}
-        <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">{children}</main>
+        <main className="w-full px-4 py-6 sm:px-6 lg:px-8">{children}</main>
       </div>
     </div>
   );

@@ -34,7 +34,7 @@ export async function getCampaignProblems(campaignId: string): Promise<string[]>
   if (!campaign.subject?.trim()) problems.push("Add a subject line");
 
   const from = campaign.fromEmail?.trim() ?? "";
-  if (!from) problems.push("Add a sender (from) email address");
+  if (!from) problems.push("Add your sender email in Settings");
   else if (!isValidEmail(from)) problems.push(`The from email address "${from}" is not valid`);
 
   const replyTo = campaign.replyTo?.trim();
@@ -49,14 +49,14 @@ export async function getCampaignProblems(campaignId: string): Promise<string[]>
   const listIds = campaign.listIds ?? [];
   const segmentIds = campaign.segmentIds ?? [];
   if (listIds.length === 0 && segmentIds.length === 0) {
-    problems.push("Choose at least one list or segment to send to");
+    problems.push("Choose at least one list to send to");
   } else if ((await countRecipients(listIds, segmentIds)) === 0) {
     problems.push(NO_RECIPIENTS);
   }
   return problems;
 }
 
-const NO_RECIPIENTS = "The selected lists and segments have no subscribed contacts";
+const NO_RECIPIENTS = "No one on the selected lists can receive email yet";
 
 function problemsMessage(problems: string[]): string {
   return problems.length === 1

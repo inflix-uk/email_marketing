@@ -49,6 +49,12 @@ Stack: Next.js 16 App Router + React 19 + Tailwind v4, MongoDB (official `mongod
 - Never re-subscribe a contact whose status is `unsubscribed`/`bounced`/`complained` as a side effect (imports, list adds). Only an explicit manual edit may do that.
 - Code under `src/lib/**` and `src/db/**` also runs in the worker via tsx: don't import `server-only` or `next/*` there (except `lib/auth.ts`, `lib/setup.ts`). Scripts run as CommonJS: no top-level `await`.
 
+## Keep the UI simple (owner's request)
+- The app shows only: Campaigns (home), Contacts, Lists, Templates, Settings. Few fields, few clicks, short plain labels, no jargon. The main area is full width.
+- A campaign is one screen: Subject + Template + Lists, then Send now / Save draft / Schedule / Send test (`submitCampaign` in `campaigns/actions.ts` saves first, then runs the clicked intent). Content is copied from the chosen template on every save; emails are designed only in Templates. Sender comes from Settings.
+- Segments, sign-up forms, automations, A/B tests and API keys have no UI any more (their old pages are unlinked; the lib code below still exists). Don't add them back to the UI unless asked.
+- Every dropdown is the searchable Select2-style `Select` (`src/components/ui/select.tsx`): same props/children as `<select>`, with a hidden native select underneath. If code sets a select's `.value`, dispatch a bubbling `change` event so the dropdown updates.
+
 ## Feature areas added after the MVP
 - **Segments** (`src/lib/segments`, `/segments`): saved live filters. `audienceFilter({ listIds, segmentIds })` is the single definition of a campaign audience (lists OR segments); senders add `status: "subscribed"`.
 - **Sign-up forms + double opt-in** (`src/lib/forms`, `/forms`, public `/f/[formId]`, `/c/[token]`, `POST /api/subscribe/[formId]`). Unconfirmed sign-ups are contacts with status `pending` and are never emailed.

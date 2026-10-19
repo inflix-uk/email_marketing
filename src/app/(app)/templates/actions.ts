@@ -7,7 +7,7 @@ import { collections } from "@/db";
 import { newId, type TemplateDoc } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
 import { parseDesign, renderDesign, serializeDesign } from "@/lib/email-design";
-import { findStarter } from "@/lib/templates/starters";
+import { BLANK_STARTER, BLANK_VISUAL_STARTER, findStarter } from "@/lib/templates/starters";
 
 const MAX_NAME = 120;
 const MAX_SUBJECT = 200;
@@ -31,8 +31,8 @@ const optionalText = (max: number, label: string) =>
 
 const htmlSchema = z
   .string()
-  .refine((value) => value.trim().length > 0, "The email HTML can't be empty.")
-  .refine((value) => value.length <= MAX_HTML_CHARS, "The HTML is too large (max 500 KB).")
+  .refine((value) => value.trim().length > 0, "The email can't be empty.")
+  .refine((value) => value.length <= MAX_HTML_CHARS, "This email is too large. Remove some content and try again.")
   // Form posts turn line breaks into CRLF; store what the editor shows (LF),
   // so the saved HTML compares equal to the editor content afterwards.
   .transform((value) => value.replace(/\r\n?/g, "\n"));
@@ -42,41 +42,35 @@ function text(formData: FormData, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+/** The field's value, or undefined when the form doesn't have it at all (= leave it unchanged). */
+function optionalField(formData: FormData, key: string): string | undefined {
+  return formData.has(key) ? text(formData, key) : undefined;
+}
+
 function templatePaths(id?: string) {
   revalidatePath("/templates");
   if (id) revalidatePath(`/templates/${id}`);
 }
 
 // ---------------------------------------------------------------------------
-// Create
+// Create (one click on a starter card on /templates/new)
 // ---------------------------------------------------------------------------
 
-export interface CreateTemplateState {
-  error?: string;
-  fieldErrors?: { name?: string[]; starter?: string[] };
-}
-
-const createSchema = z.object({
-  name: nameSchema,
-  starter: z.string().refine((key) => findStarter(key) !== undefined, "Choose a starting point."),
-});
-
-export async function createTemplate(_prev: CreateTemplateState, formData: FormData): Promise<CreateTemplateState> {
+export async function createTemplate(formData: FormData): Promise<void> {
   await requireSession();
-  const parsed = createSchema.safeParse({ name: text(formData, "name"), starter: text(formData, "starter") });
-  if (!parsed.success) {
-    return { fieldErrors: z.flattenError(parsed.error).fieldErrors };
-  }
+  const starter = findStarter(text(formData, "starter"));
+  if (!starter) redirect("/templates/new");
 
-  const starter = findStarter(parsed.data.starter)!;
+  const blank = starter.key === BLANK_VISUAL_STARTER.key || starter.key === BLANK_STARTER.key;
   const now = new Date();
   const created: TemplateDoc = {
     _id: newId(),
-    name: parsed.data.name,
+    name: blank ? "Untitled template" : starter.name,
     subject: starter.subject || null,
-    previewText: starter.previewText || null,
+    // The template editor has no preview-text field, so new templates don't
+    // get the starter's (it couldn't be changed to match the new content).
+    previewText: null,
     html: starter.html,
-    // Starter designs open in the visual editor; "Blank (HTML)" has no design.
     design: starter.design,
     createdAt: now,
     updatedAt: now,
@@ -104,27 +98,33 @@ const saveSchema = z.object({
   id: z.string().min(1),
   name: nameSchema,
   subject: optionalText(MAX_SUBJECT, "The subject"),
-  previewText: optionalText(MAX_PREVIEW_TEXT, "Preview text"),
+  /** Not on the form any more: missing means "keep the stored value". */
+  previewText: optionalText(MAX_PREVIEW_TEXT, "Preview text").optional(),
   html: htmlSchema,
   /** Design JSON from the visual editor; "" when the HTML was written by hand. */
   design: z.string().max(MAX_DESIGN_CHARS, "The design is too large."),
 });
 
+/**
+ * Saves the template. When the form was submitted with the
+ * `then=campaign` button, continues to a new campaign using it.
+ */
 export async function saveTemplate(_prev: SaveTemplateState, formData: FormData): Promise<SaveTemplateState> {
   await requireSession();
   const parsed = saveSchema.safeParse({
     id: text(formData, "id"),
     name: text(formData, "name"),
     subject: text(formData, "subject"),
-    previewText: text(formData, "previewText"),
+    previewText: optionalField(formData, "previewText"),
     html: text(formData, "html"),
     design: text(formData, "design"),
   });
   if (!parsed.success) {
-    return { error: "Please fix the highlighted fields.", fieldErrors: z.flattenError(parsed.error).fieldErrors };
+    const fieldErrors = z.flattenError(parsed.error).fieldErrors;
+    return { error: Object.values(fieldErrors).flat()[0] ?? "Check the form and try again.", fieldErrors };
   }
 
-  const { id, ...values } = parsed.data;
+  const { id, previewText, ...values } = parsed.data;
   let html = values.html;
   let design: string | null = null;
   if (values.design.trim()) {
@@ -133,27 +133,37 @@ export async function saveTemplate(_prev: SaveTemplateState, formData: FormData)
     const parsedDesign = parseDesign(values.design);
     if (!parsedDesign) {
       return {
-        error: "The visual design couldn't be read, so nothing was saved. Reload the page and try again.",
-        fieldErrors: { design: ["The visual design is not valid."] },
+        error: "The design couldn't be read, so nothing was saved. Reload the page and try again.",
+        fieldErrors: { design: ["The design is not valid."] },
       };
     }
     design = serializeDesign(parsedDesign);
     html = renderDesign(parsedDesign);
     if (html.length > MAX_HTML_CHARS) {
-      return { error: "This email is too large (max 500 KB). Remove some blocks and try again." };
+      return { error: "This email is too large. Remove some blocks and try again." };
     }
   }
 
   const { templates } = await collections();
   const result = await templates.updateOne(
     { _id: id },
-    { $set: { ...values, html, design, updatedAt: new Date() } },
+    {
+      $set: {
+        name: values.name,
+        subject: values.subject,
+        ...(previewText !== undefined ? { previewText } : {}),
+        html,
+        design,
+        updatedAt: new Date(),
+      },
+    },
   );
   if (result.matchedCount === 0) {
     return { error: "This template no longer exists - it may have been deleted." };
   }
 
   templatePaths(id);
+  if (text(formData, "then") === "campaign") redirect(`/campaigns/new?template=${encodeURIComponent(id)}`);
   return { ok: true };
 }
 

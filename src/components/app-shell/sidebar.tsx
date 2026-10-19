@@ -5,20 +5,16 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/", label: "Dashboard", icon: "M3 12l9-9 9 9M5 10v10h14V10" },
   { href: "/campaigns", label: "Campaigns", icon: "M3 8l9 6 9-6M3 8v10h18V8M3 8l9-5 9 5" },
-  { href: "/automations", label: "Automations", icon: "M13 2L4 14h7l-1 8 9-12h-7l1-8z" },
   { href: "/contacts", label: "Contacts", icon: "M16 11a4 4 0 10-8 0 4 4 0 008 0zM4 21a8 8 0 0116 0" },
   { href: "/lists", label: "Lists", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" },
-  { href: "/segments", label: "Segments", icon: "M3 5h18l-7 8v6l-4 2v-8L3 5z" },
-  { href: "/forms", label: "Forms", icon: "M5 3h14v18H5zM8 8h8M8 12h8M8 16h5" },
   { href: "/templates", label: "Templates", icon: "M4 4h16v16H4zM4 9h16M9 9v11" },
   { href: "/settings", label: "Settings", icon: "M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z" },
 ];
 
 export function Sidebar({ userEmail, logout }: { userEmail: string; logout: () => Promise<void> }) {
   const pathname = usePathname();
-  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  const isActive = (href: string) => pathname.startsWith(href);
 
   return (
     <aside className="flex w-full shrink-0 flex-col border-b border-slate-200 bg-white md:h-screen md:w-60 md:border-b-0 md:border-r md:sticky md:top-0">

@@ -5,21 +5,14 @@ import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth";
 import { addEmailsToList, createList, deleteList, removeListMember, updateList, type AddEmailsResult } from "@/lib/contacts/mutations";
 import { getList } from "@/lib/contacts/queries";
-import { firstErrors, listInputSchema, parseEmailList } from "@/lib/contacts/validation";
+import { listInputSchema, parseEmailList } from "@/lib/contacts/validation";
 
 export interface ListFormState {
   ok?: boolean;
   error?: string;
-  fieldErrors?: Partial<Record<"name" | "description", string>>;
+  fieldErrors?: Partial<Record<"name", string>>;
   /** Echoed back on errors so the form keeps what was typed. */
-  values?: { name: string; description: string };
-}
-
-function listFormValues(formData: FormData) {
-  return {
-    name: String(formData.get("name") ?? ""),
-    description: String(formData.get("description") ?? ""),
-  };
+  values?: { name: string };
 }
 
 function revalidateLists(id?: string) {
@@ -28,24 +21,35 @@ function revalidateLists(id?: string) {
   revalidatePath("/contacts", "layout");
 }
 
+/** The list forms only have a name. */
+function parseName(formData: FormData) {
+  const values = { name: String(formData.get("name") ?? "") };
+  const parsed = listInputSchema.shape.name.safeParse(values.name);
+  return parsed.success
+    ? { ok: true as const, name: parsed.data, values }
+    : { ok: false as const, state: { fieldErrors: { name: parsed.error.issues[0].message }, values } };
+}
+
 export async function createListAction(_prev: ListFormState, formData: FormData): Promise<ListFormState> {
   await requireSession();
-  const values = listFormValues(formData);
-  const parsed = listInputSchema.safeParse(values);
-  if (!parsed.success) return { fieldErrors: firstErrors(parsed.error), values };
+  const input = parseName(formData);
+  if (!input.ok) return input.state;
 
-  const id = await createList(parsed.data);
+  const id = await createList({ name: input.name, description: null });
   revalidateLists();
   redirect(`/lists/${id}`);
 }
 
+/** Rename a list. Its stored description (no longer editable) is kept as it is. */
 export async function updateListAction(id: string, _prev: ListFormState, formData: FormData): Promise<ListFormState> {
   await requireSession();
-  const values = listFormValues(formData);
-  const parsed = listInputSchema.safeParse(values);
-  if (!parsed.success) return { fieldErrors: firstErrors(parsed.error), values };
+  const input = parseName(formData);
+  if (!input.ok) return input.state;
 
-  if (!(await updateList(id, parsed.data))) return { error: "This list no longer exists.", values };
+  const current = await getList(id);
+  if (!current || !(await updateList(id, { name: input.name, description: current.description ?? null }))) {
+    return { error: "This list no longer exists.", values: input.values };
+  }
   revalidateLists(id);
   return { ok: true };
 }
@@ -83,9 +87,7 @@ export async function addEmailsAction(listId: string, _prev: AddEmailsState, for
 
   if (emails.length === 0) {
     return {
-      error: invalid.length
-        ? "None of those look like email addresses. Put one address per line, or separate them with commas."
-        : "Paste at least one email address.",
+      error: invalid.length ? "None of those are email addresses." : "Paste at least one email address.",
       invalid: invalid.slice(0, 20),
       invalidCount: invalid.length,
       text,
@@ -93,7 +95,7 @@ export async function addEmailsAction(listId: string, _prev: AddEmailsState, for
   }
   if (emails.length > MAX_PASTED_EMAILS) {
     return {
-      error: `That's ${emails.length.toLocaleString("en-GB")} addresses - paste at most ${MAX_PASTED_EMAILS.toLocaleString("en-GB")} at a time, or use a CSV import.`,
+      error: `That's ${emails.length.toLocaleString("en-GB")} addresses. Paste at most ${MAX_PASTED_EMAILS.toLocaleString("en-GB")} at a time, or import a CSV file.`,
       text,
     };
   }

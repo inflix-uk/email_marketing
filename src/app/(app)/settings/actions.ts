@@ -1,14 +1,17 @@
 "use server";
 
-import path from "node:path";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireSession, updateAccount } from "@/lib/auth";
-import { classifySendError, sendEmail, verifyMailer } from "@/lib/mailer";
+import { classifySendError, sendEmail } from "@/lib/mailer";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { escapeHtml } from "@/lib/render";
 import { getSettings, updateSettings, type SmtpSettings } from "@/lib/settings";
 import { isValidEmail, normalizeEmail } from "@/lib/utils";
+
+// Each form saves only the fields it shows: updateSettings() $sets just the
+// keys it is given, so settings that are no longer on the page (reply-to,
+// sending speed, daily limit, bounce pause) keep their stored values.
 
 export interface SettingsFormState {
   ok?: string;
@@ -31,7 +34,7 @@ function invalid(error: z.ZodError): SettingsFormState {
 }
 
 function saved(message = "Saved"): SettingsFormState {
-  revalidatePath("/", "layout"); // also updates the test-mode banner
+  revalidatePath("/", "layout"); // also updates the "not set up" banner
   return { ok: message, savedAt: Date.now() };
 }
 
@@ -47,14 +50,8 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 const email = (message = "Enter a valid email address") =>
   z.string().trim().refine(isValidEmail, message).transform(normalizeEmail);
 
-const optionalEmail = z
-  .string()
-  .trim()
-  .refine((v) => v === "" || isValidEmail(v), "Enter a valid email address, or leave it empty")
-  .transform((v) => (v ? normalizeEmail(v) : ""));
-
 // ---------------------------------------------------------------------------
-// Email provider (SMTP)
+// Email sending (SMTP): Save, or Send test email (which also saves on success)
 // ---------------------------------------------------------------------------
 
 const smtpSchema = z.object({
@@ -73,128 +70,7 @@ const smtpSchema = z.object({
   pass: z.string().max(1000, "Password is too long"),
 });
 
-/**
- * Save the SMTP settings, test them without saving, or switch to test mode.
- * The saved password never goes to the browser: a blank password field keeps
- * it, but only while the host and username stay the same (so it is never
- * handed to a different server).
- */
-export async function saveEmailProvider(_prev: SettingsFormState, formData: FormData): Promise<SettingsFormState> {
-  await requireSession();
-  const intent = formData.get("intent");
-
-  if (intent === "test-mode") {
-    await updateSettings({ smtp: { host: "" } });
-    return saved("Test mode is on - emails are saved to data/outbox.");
-  }
-
-  const parsed = smtpSchema.safeParse(fields(formData));
-  if (!parsed.success) return invalid(parsed.error);
-  const input = parsed.data;
-
-  const current = (await getSettings()).smtp;
-  const sameServer = input.host === current.host.trim().toLowerCase() && input.user === current.user;
-  let pass = input.pass;
-  if (!pass && input.user) {
-    if (sameServer && current.pass) pass = current.pass;
-    else if (input.host) return { fieldErrors: { pass: ["Enter the password for this server"] } };
-  }
-  const smtp: SmtpSettings = { host: input.host, port: input.port, secure: input.secure, user: input.user, pass };
-
-  if (intent === "test") {
-    if (!smtp.host) return { ok: "No host entered - test mode needs no connection. Emails are saved to data/outbox." };
-    const result = await withTimeout(verifyMailer(smtp), 20_000, "No response after 20 seconds").catch(
-      (err: unknown) => ({ ok: false, error: err instanceof Error ? err.message : String(err) }),
-    );
-    if (result.ok) return { ok: `Connected to ${smtp.host}:${smtp.port}${smtp.user ? " and signed in" : ""}.` };
-    return { error: `Connection failed: ${result.error ?? "unknown error"}. Check the host, port, encryption and login.` };
-  }
-
-  await updateSettings({ smtp });
-  return saved(smtp.host ? "Saved" : "Saved - no host, so test mode is on.");
-}
-
-// ---------------------------------------------------------------------------
-// Sender
-// ---------------------------------------------------------------------------
-
-const senderSchema = z.object({
-  fromName: z.string().trim().min(1, "Enter a sender name").max(100, "Keep the name under 100 characters"),
-  fromEmail: email("Enter the email address you send from"),
-  replyTo: optionalEmail,
-  companyAddress: z.string().trim().max(500, "Keep the address under 500 characters"),
-});
-
-export async function saveSender(_prev: SettingsFormState, formData: FormData): Promise<SettingsFormState> {
-  await requireSession();
-  const parsed = senderSchema.safeParse(fields(formData));
-  if (!parsed.success) return invalid(parsed.error);
-  await updateSettings(parsed.data);
-  return saved();
-}
-
-// ---------------------------------------------------------------------------
-// Sending
-// ---------------------------------------------------------------------------
-
-const sendingSchema = z.object({
-  appUrl: z
-    .string()
-    .trim()
-    .refine((v) => {
-      try {
-        const url = new URL(v);
-        return (url.protocol === "https:" || url.protocol === "http:") && Boolean(url.hostname);
-      } catch {
-        return false;
-      }
-    }, "Enter a full address starting with https:// (or http:// for local testing)"),
-  sendRatePerSecond: z
-    .string()
-    .trim()
-    .refine((v) => /^\d+$/.test(v) && Number(v) >= 1 && Number(v) <= 50, "Enter a whole number from 1 to 50")
-    .transform(Number),
-});
-
-export async function saveSending(_prev: SettingsFormState, formData: FormData): Promise<SettingsFormState> {
-  await requireSession();
-  const parsed = sendingSchema.safeParse(fields(formData));
-  if (!parsed.success) return invalid(parsed.error);
-  // Links are built as `${appUrl}/u/...`, so keep only origin + path.
-  const url = new URL(parsed.data.appUrl);
-  const appUrl = `${url.origin}${url.pathname}`.replace(/\/+$/, "");
-  await updateSettings({ appUrl, sendRatePerSecond: parsed.data.sendRatePerSecond });
-  return saved();
-}
-
-// ---------------------------------------------------------------------------
-// Deliverability
-// ---------------------------------------------------------------------------
-
-const deliverabilitySchema = z.object({
-  dailySendLimit: z
-    .string()
-    .trim()
-    .refine((v) => /^\d{1,8}$/.test(v), "Enter a whole number (0 = unlimited)")
-    .transform(Number),
-  bouncePauseRate: z
-    .string()
-    .trim()
-    .refine((v) => /^\d{1,3}(\.\d)?$/.test(v) && Number(v) <= 100, "Enter a percentage from 0 to 100 (0 = off)")
-    .transform(Number),
-});
-
-export async function saveDeliverability(_prev: SettingsFormState, formData: FormData): Promise<SettingsFormState> {
-  await requireSession();
-  const parsed = deliverabilitySchema.safeParse(fields(formData));
-  if (!parsed.success) return invalid(parsed.error);
-  await updateSettings(parsed.data);
-  return saved();
-}
-
-// ---------------------------------------------------------------------------
-// Test email
-// ---------------------------------------------------------------------------
+const TIMEOUT_MESSAGE = "The email server didn't answer within 30 seconds";
 
 function testEmailHtml(lines: string[], companyAddress: string): string {
   const body = lines.map((l) => `<p style="margin:0 0 12px;">${escapeHtml(l)}</p>`).join("");
@@ -207,42 +83,110 @@ ${companyAddress ? `<p style="max-width:520px;margin:16px auto 0;font-size:12px;
 </body></html>`;
 }
 
-export async function sendTestEmail(_prev: SettingsFormState, formData: FormData): Promise<SettingsFormState> {
+/**
+ * intent=save: store the SMTP fields.
+ * intent=test: send a test email with the values in the form (saved or not)
+ * and store them only if it went through - a successful send proves the
+ * connection and login.
+ *
+ * The saved password never goes to the browser: a blank password field keeps
+ * it, but only while the host and username stay the same (so it is never
+ * handed to a different server).
+ */
+export async function saveEmailSending(_prev: SettingsFormState, formData: FormData): Promise<SettingsFormState> {
   await requireSession();
-  const parsed = z.object({ to: email() }).safeParse(fields(formData));
+  const test = formData.get("intent") === "test";
+
+  const parsed = smtpSchema.safeParse(fields(formData));
   if (!parsed.success) return invalid(parsed.error);
-  const { to } = parsed.data;
+  const input = parsed.data;
 
   const settings = await getSettings();
-  if (!settings.fromEmail) return { error: "Set a From email in the Sender section first." };
-  const via = settings.smtp.host ? `${settings.smtp.host}:${settings.smtp.port}` : "test mode (data/outbox)";
-  const lines = [
-    "This is a test message from Inflix Marketing. If you can read it, your settings work.",
-    `From: ${settings.fromName || settings.fromEmail} <${settings.fromEmail}>`,
-    `Sent via: ${via}`,
-  ];
+  const current = settings.smtp;
+  const sameServer = input.host === current.host.trim().toLowerCase() && input.user === current.user;
+  let pass = input.pass;
+  if (!pass && input.user) {
+    if (sameServer && current.pass) pass = current.pass;
+    else if (input.host) return { fieldErrors: { pass: ["Enter the password"] } };
+  }
+  const smtp: SmtpSettings = { host: input.host, port: input.port, secure: input.secure, user: input.user, pass };
+
+  if (!test) {
+    await updateSettings({ smtp });
+    return saved(smtp.host ? "Saved" : "Saved. Emails won't be sent until you add your email provider.");
+  }
+
+  const to = email("Enter the address to send the test to").safeParse(String(formData.get("to") ?? ""));
+  if (!to.success) return { fieldErrors: { to: to.error.issues.map((i) => i.message) } };
+  if (!smtp.host) return { fieldErrors: { host: ["Enter your email provider's host first"] } };
+  if (!settings.fromEmail) return { error: "Add a From email under Sender first, then send the test again." };
 
   try {
-    const result = await withTimeout(
-      sendEmail({
-        to,
-        from: { name: settings.fromName, address: settings.fromEmail },
-        replyTo: settings.replyTo || null,
-        subject: "Test email from Inflix Marketing",
-        html: testEmailHtml(lines, settings.companyAddress),
-      }),
+    await withTimeout(
+      sendEmail(
+        {
+          to: to.data,
+          from: { name: settings.fromName, address: settings.fromEmail },
+          replyTo: settings.replyTo || null,
+          subject: "Test email from Inflix Marketing",
+          html: testEmailHtml(
+            [
+              "This is a test message from Inflix Marketing. If you can read it, your settings work.",
+              `From: ${settings.fromName || settings.fromEmail} <${settings.fromEmail}>`,
+              `Sent through: ${smtp.host}:${smtp.port}`,
+            ],
+            settings.companyAddress,
+          ),
+        },
+        smtp,
+      ),
       30_000,
-      "The mail server did not respond within 30 seconds",
+      TIMEOUT_MESSAGE,
     );
-    if (result.outboxPath) {
-      const file = path.relative(process.cwd(), result.outboxPath).split(path.sep).join("/");
-      return { ok: `Test mode: saved to ${file} (not actually sent).` };
-    }
-    return { ok: `Sent to ${to}. It can take a minute to arrive - check spam too.` };
   } catch (err) {
     const { config, message } = classifySendError(err);
-    return { error: config ? `${message}. Check the Email provider settings and use Test connection.` : message };
+    if (config || message === TIMEOUT_MESSAGE) {
+      return { error: `Couldn't connect: ${message}. Check the host, port, encryption, username and password.` };
+    }
+    return { error: `Not sent: ${message}` };
   }
+
+  await updateSettings({ smtp });
+  return saved(`Sent to ${to.data} and settings saved. Check your inbox (and spam folder).`);
+}
+
+// ---------------------------------------------------------------------------
+// Sender (+ the app's website address, used in unsubscribe links)
+// ---------------------------------------------------------------------------
+
+const senderSchema = z.object({
+  fromName: z.string().trim().min(1, "Enter a sender name").max(100, "Keep the name under 100 characters"),
+  fromEmail: email("Enter the email address you send from"),
+  companyAddress: z.string().trim().max(500, "Keep the address under 500 characters"),
+  appUrl: z
+    .string()
+    .trim()
+    .refine((v) => {
+      try {
+        const url = new URL(v);
+        return (url.protocol === "https:" || url.protocol === "http:") && Boolean(url.hostname);
+      } catch {
+        return false;
+      }
+    }, "Enter a full address starting with https://")
+    // Links are built as `${appUrl}/u/...`, so keep only origin + path.
+    .transform((v) => {
+      const url = new URL(v);
+      return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+    }),
+});
+
+export async function saveSender(_prev: SettingsFormState, formData: FormData): Promise<SettingsFormState> {
+  await requireSession();
+  const parsed = senderSchema.safeParse(fields(formData));
+  if (!parsed.success) return invalid(parsed.error);
+  await updateSettings(parsed.data); // reply-to is not on the page and stays as stored
+  return saved();
 }
 
 // ---------------------------------------------------------------------------

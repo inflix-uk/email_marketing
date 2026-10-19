@@ -12,9 +12,8 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return <textarea className={cn(control, className)} {...props} />;
 }
 
-export function Select({ className, ...props }: ComponentProps<"select">) {
-  return <select className={cn(control, "h-9 pr-8", className)} {...props} />;
-}
+// Searchable (Select2-style) dropdown, used for every <Select> in the app.
+export { Select } from "./select";
 
 export function Label({ className, ...props }: ComponentProps<"label">) {
   return <label className={cn("block text-sm font-medium text-slate-700", className)} {...props} />;

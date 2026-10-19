@@ -2,14 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
-import { ButtonLink, SubmitButton } from "@/components/ui/button";
-import { PageHeader } from "@/components/ui/layout";
+import { SubmitButton } from "@/components/ui/button";
 import { collections } from "@/db";
 import { fromDoc } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
-import { getSettings } from "@/lib/settings";
-import { testSender } from "@/lib/templates/recipients";
-import { formatDateTime } from "@/lib/utils";
 import { duplicateTemplate } from "../actions";
 import { DeleteTemplateButton } from "../delete-template-button";
 import { TemplateForm } from "./template-form";
@@ -30,34 +26,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function TemplatePage({ params }: Props) {
   const { id } = await params;
-  const [template, session, settings] = await Promise.all([getTemplate(id), requireSession(), getSettings()]);
+  const [template, session] = await Promise.all([getTemplate(id), requireSession()]);
   if (!template) notFound();
 
   return (
     <>
-      <PageHeader
-        back={
-          <Link href="/templates" className="text-slate-500 hover:text-slate-700">
-            ← Templates
-          </Link>
-        }
-        title={template.name}
-        description={`Last saved ${formatDateTime(template.updatedAt)}`}
-        actions={
-          <>
-            <ButtonLink href={`/campaigns/new?templateId=${template.id}`} variant="secondary">
-              Use in campaign
-            </ButtonLink>
-            <form action={duplicateTemplate}>
-              <input type="hidden" name="id" value={template.id} />
-              <SubmitButton variant="secondary" pendingText="Duplicating...">
-                Duplicate
-              </SubmitButton>
-            </form>
-            <DeleteTemplateButton id={template.id} name={template.name} />
-          </>
-        }
-      />
+      <h1 className="sr-only">Edit template</h1>
+      <div className="mb-3 text-sm">
+        <Link href="/templates" className="text-slate-500 hover:text-slate-700">
+          ← Templates
+        </Link>
+      </div>
 
       {/* Keyed so switching templates (e.g. after Duplicate) starts with fresh editor state. */}
       <TemplateForm
@@ -71,7 +50,17 @@ export default async function TemplatePage({ params }: Props) {
           design: template.design ?? null,
         }}
         testRecipient={session.email}
-        sender={testSender(settings)}
+        secondaryActions={
+          <>
+            <form action={duplicateTemplate}>
+              <input type="hidden" name="id" value={template.id} />
+              <SubmitButton variant="ghost" pendingText="Duplicating..." title="Make a copy of the saved version">
+                Duplicate
+              </SubmitButton>
+            </form>
+            <DeleteTemplateButton id={template.id} name={template.name} variant="ghost" />
+          </>
+        }
       />
     </>
   );

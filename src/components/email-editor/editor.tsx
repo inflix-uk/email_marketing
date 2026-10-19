@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Segmented, SegmentButton } from "./controls";
 import { HtmlEditor } from "./html-editor";
 import { initialMode, type EditorMode } from "./mode";
 import { VisualEditor } from "./visual-editor";
@@ -11,10 +10,15 @@ export interface EmailEditorProps {
   name: string;
   /** Initial HTML. Later changes are ignored - remount with a `key` to reset. */
   defaultValue: string;
-  /** Shown above the preview, for context. */
+  /** @deprecated No longer shown; accepted so older callers keep compiling. */
   previewText?: string;
-  /** Minimum height of the editing / preview panes in px. */
+  /** Minimum height of the editing / preview panes in px (used when `height` isn't set). */
   minHeight?: number;
+  /**
+   * CSS height of the editing / preview panes, e.g. "calc(100dvh - 16rem)".
+   * Defaults to roughly the viewport height, at least `minHeight`.
+   */
+  height?: string;
   /** Called with the new HTML after every edit. */
   onChange?: (html: string) => void;
   /** id of the code textarea (HTML mode), for an external <label htmlFor>. */
@@ -36,22 +40,22 @@ export interface EmailEditorProps {
 }
 
 /**
- * Email editor with a live preview, merge-tag insertion and lint checks.
+ * Email editor with a live preview.
  *
- * - HTML mode: a code editor (the only mode when `designName` isn't set).
  * - Visual mode: build the email from blocks; the HTML is generated.
+ * - HTML mode: a code editor (the only mode when `designName` isn't set).
  *
  * Either way the current HTML is submitted through a hidden input.
  */
 export function EmailEditor(props: EmailEditorProps) {
   if (props.designName === undefined) {
-    const { name, defaultValue, previewText, minHeight, onChange, id } = props;
+    const { name, defaultValue, minHeight, height, onChange, id } = props;
     return (
       <HtmlEditor
         name={name}
         defaultValue={defaultValue}
-        previewText={previewText}
         minHeight={minHeight}
+        height={height}
         onChange={onChange}
         id={id}
       />
@@ -63,8 +67,8 @@ export function EmailEditor(props: EmailEditorProps) {
 function DualModeEditor({
   name,
   defaultValue,
-  previewText,
   minHeight,
+  height,
   onChange,
   id,
   designName,
@@ -80,8 +84,8 @@ function DualModeEditor({
         designName={designName}
         initialDesign={mode.design}
         announceInitial={mode.fresh}
-        previewText={previewText}
         minHeight={minHeight}
+        height={height}
         onChange={onChange}
         onDesignChange={onDesignChange}
         onSwitchToHtml={(html) => {
@@ -99,25 +103,10 @@ function DualModeEditor({
       <HtmlEditor
         name={name}
         defaultValue={mode.html}
-        previewText={previewText}
         minHeight={minHeight}
+        height={height}
         onChange={onChange}
         id={id}
-        toolbarStart={
-          <Segmented label="Editor mode">
-            <SegmentButton
-              pressed={false}
-              disabled
-              title="Hand-written HTML can't be converted into a visual design"
-            >
-              Visual
-            </SegmentButton>
-            <SegmentButton pressed onClick={() => undefined}>
-              HTML
-            </SegmentButton>
-          </Segmented>
-        }
-        notice="This email is hand-written HTML. HTML can't be converted into visual blocks, so it is edited as code."
       />
       <input type="hidden" name={designName} value="" />
     </>

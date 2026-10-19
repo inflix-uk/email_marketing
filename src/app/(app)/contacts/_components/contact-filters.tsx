@@ -4,16 +4,15 @@ import { useRouter } from "next/navigation";
 import { useTransition, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/form";
-import { CONTACT_STATUSES } from "@/db/schema";
-import { CONTACT_STATUS_LABELS, hasFilters, type ContactFilters } from "@/lib/contacts/filters";
-import type { ListRef, TagOption } from "@/lib/contacts/queries";
+import { hasFilters, type ContactFilters } from "@/lib/contacts/filters";
+import type { ListRef } from "@/lib/contacts/queries";
 
 /**
- * Search + status + list + tag filters for the contacts table. Selects apply
+ * Search box + list dropdown for the contacts table. The list applies
  * immediately; the search applies on Enter. Works as a plain GET form without JS.
  * Render it with a `key` derived from the filters so it resets on navigation.
  */
-export function ContactFiltersBar({ filters, lists, tags }: { filters: ContactFilters; lists: ListRef[]; tags: TagOption[] }) {
+export function ContactFiltersBar({ filters, lists }: { filters: ContactFilters; lists: ListRef[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -30,11 +29,6 @@ export function ContactFiltersBar({ filters, lists, tags }: { filters: ContactFi
     e.preventDefault();
     apply(e.currentTarget);
   }
-
-  const active = hasFilters(filters);
-  // Keep the current tag selectable even when no contact has it any more.
-  const tagNames = tags.map((t) => t.tag);
-  if (filters.tag && !tagNames.includes(filters.tag)) tagNames.unshift(filters.tag);
 
   return (
     <form
@@ -53,58 +47,24 @@ export function ContactFiltersBar({ filters, lists, tags }: { filters: ContactFi
         type="search"
         defaultValue={filters.q}
         placeholder="Search by email or name..."
-        className="sm:max-w-xs"
+        className="sm:w-72"
       />
-      <label htmlFor="contact-status" className="sr-only">
-        Status
-      </label>
-      <Select
-        id="contact-status"
-        name="status"
-        defaultValue={filters.status ?? ""}
-        onChange={(e) => apply(e.currentTarget.form!)}
-        className="sm:w-44"
-      >
-        <option value="">All statuses</option>
-        {CONTACT_STATUSES.map((s) => (
-          <option key={s} value={s}>
-            {CONTACT_STATUS_LABELS[s]}
-          </option>
-        ))}
-      </Select>
-      <label htmlFor="contact-list" className="sr-only">
-        List
-      </label>
-      <Select
-        id="contact-list"
-        name="list"
-        defaultValue={filters.listId ?? ""}
-        onChange={(e) => apply(e.currentTarget.form!)}
-        className="sm:w-52"
-      >
-        <option value="">All lists</option>
-        {lists.map((l) => (
-          <option key={l.id} value={l.id}>
-            {l.name}
-          </option>
-        ))}
-      </Select>
-      {tagNames.length > 0 ? (
+      {lists.length > 0 ? (
         <>
-          <label htmlFor="contact-tag" className="sr-only">
-            Tag
+          <label htmlFor="contact-list" className="sr-only">
+            List
           </label>
           <Select
-            id="contact-tag"
-            name="tag"
-            defaultValue={filters.tag ?? ""}
+            id="contact-list"
+            name="list"
+            defaultValue={filters.listId ?? ""}
             onChange={(e) => apply(e.currentTarget.form!)}
-            className="sm:w-44"
+            className="sm:w-52"
           >
-            <option value="">All tags</option>
-            {tagNames.map((tag) => (
-              <option key={tag} value={tag}>
-                {tag}
+            <option value="">All lists</option>
+            {lists.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
               </option>
             ))}
           </Select>
@@ -114,7 +74,7 @@ export function ContactFiltersBar({ filters, lists, tags }: { filters: ContactFi
         <Button type="submit" variant="secondary" disabled={pending}>
           {pending ? "Searching..." : "Search"}
         </Button>
-        {active ? (
+        {hasFilters(filters) ? (
           <Button type="button" variant="ghost" onClick={() => startTransition(() => router.push("/contacts"))}>
             Clear
           </Button>

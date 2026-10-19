@@ -3,15 +3,16 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { CampaignSkeleton } from "../_components/skeleton";
 import { firstParam, getCampaign, isEditable, parsePage, RECIPIENT_FILTERS, type RecipientFilter } from "../_lib/queries";
+import { displaySubject } from "../_lib/display";
 import { CampaignEditor } from "./campaign-editor";
 import { CampaignReport } from "./campaign-report";
 
 type Params = Promise<{ id: string }>;
-type SearchParams = Promise<{ filter?: string | string[]; page?: string | string[] }>;
+type SearchParams = Promise<{ filter?: string | string[]; page?: string | string[]; notice?: string | string[] }>;
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const campaign = await getCampaign((await params).id);
-  return { title: campaign?.name ?? "Campaign not found" };
+  return { title: campaign ? displaySubject(campaign.subject) || campaign.name : "Campaign not found" };
 }
 
 export default async function CampaignPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
@@ -25,7 +26,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
   if (isEditable(campaign.status)) {
     return (
       <Suspense fallback={<CampaignSkeleton />}>
-        <CampaignEditor campaign={campaign} />
+        <CampaignEditor campaign={campaign} notice={firstParam(query.notice)} />
       </Suspense>
     );
   }

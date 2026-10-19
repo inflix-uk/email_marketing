@@ -155,7 +155,7 @@ export function ImagePicker({ value, onPick }: { value: string; onPick: (url: st
         <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => inputRef.current?.click()}>
           {busy ? "Uploading..." : "Upload image"}
         </Button>
-        <span className="text-xs text-slate-500">PNG, JPEG, GIF or WebP, up to 2 MB</span>
+        <span className="text-xs text-slate-500">Up to 2 MB</span>
         {/* No name: this input is never part of the host form's submission. */}
         <input
           ref={inputRef}
@@ -180,7 +180,7 @@ export function ImagePicker({ value, onPick }: { value: string; onPick: (url: st
 
       <div>
         <p id={`${uid}-recent`} className="text-xs font-medium text-slate-700">
-          Recent images
+          Your images
         </p>
         {status === "loading" || status === "idle" ? (
           <p className="mt-1 text-xs text-slate-400">Loading...</p>

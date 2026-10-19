@@ -1,12 +1,11 @@
 "use client";
 
-import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { SAMPLE_CONTACT } from "@/lib/render";
-import { formatByteSize, htmlByteSize, lintEmailHtml } from "@/lib/templates/lint";
+import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { lintEmailHtml } from "@/lib/templates/lint";
 import { buildPreviewDocument } from "@/lib/templates/preview";
 import { cn } from "@/lib/utils";
 import { applyEditToElement } from "./apply-edit";
-import { DesktopIcon, Kbd, MobileIcon, Segmented, SegmentButton } from "./controls";
+import { DesktopIcon, MobileIcon, Segmented, SegmentButton } from "./controls";
 import { InsertVariableMenu } from "./insert-variable-menu";
 import { LintList } from "./lint-list";
 import { PreviewFrame, type PreviewWidth } from "./preview-frame";
@@ -18,38 +17,24 @@ export interface HtmlEditorProps {
   name: string;
   /** Initial HTML. Later changes are ignored - remount with a `key` to reset. */
   defaultValue: string;
-  /** Shown above the preview, for context. */
-  previewText?: string;
-  /** Minimum height of the code / preview panes in px. */
+  /** Minimum height of the code / preview panes in px (used when `height` isn't set). */
   minHeight?: number;
+  /** CSS height of the code / preview panes. */
+  height?: string;
   /** Called with the new HTML after every edit. */
   onChange?: (html: string) => void;
   /** id of the code textarea, for an external <label htmlFor>. */
   id?: string;
-  /** Extra controls at the start of the toolbar (the Visual / HTML switch). */
-  toolbarStart?: ReactNode;
-  /** One-line note shown under the toolbar. */
-  notice?: ReactNode;
 }
 
 type View = "code" | "preview";
 
-const SAMPLE_NAME = [SAMPLE_CONTACT.firstName, SAMPLE_CONTACT.lastName].filter(Boolean).join(" ");
-
 /**
  * HTML email editor: a code textarea with a live preview beside it
- * (Code / Preview tabs on narrow screens), merge-tag insertion and lint checks.
+ * (Code / Preview tabs on narrow screens). Problems are listed underneath
+ * only when there are any.
  */
-export function HtmlEditor({
-  name,
-  defaultValue,
-  previewText,
-  minHeight = 480,
-  onChange,
-  id,
-  toolbarStart,
-  notice,
-}: HtmlEditorProps) {
+export function HtmlEditor({ name, defaultValue, minHeight = 480, height, onChange, id }: HtmlEditorProps) {
   const [html, setHtml] = useState(defaultValue);
   const [view, setView] = useState<View>("code");
   const [width, setWidth] = useState<PreviewWidth>("desktop");
@@ -64,7 +49,8 @@ export function HtmlEditor({
   const settledHtml = useDebouncedValue(html, 300);
   const srcDoc = useMemo(() => buildPreviewDocument(settledHtml), [settledHtml]);
   const issues = useMemo(() => lintEmailHtml(settledHtml), [settledHtml]);
-  const size = useMemo(() => htmlByteSize(settledHtml), [settledHtml]);
+
+  const paneStyle = height ? { height } : { minHeight };
 
   function updateHtml(value: string) {
     setHtml(value);
@@ -108,7 +94,6 @@ export function HtmlEditor({
     <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-slate-200">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
-        {toolbarStart}
         <Segmented label="View" className="lg:hidden">
           <SegmentButton pressed={view === "code"} onClick={() => setView("code")}>
             Code
@@ -134,13 +119,12 @@ export function HtmlEditor({
         </Segmented>
       </div>
 
-      {notice ? (
-        <p className="border-b border-slate-200 bg-white px-4 py-2 text-xs text-slate-500">{notice}</p>
-      ) : null}
-
       <div className="grid lg:grid-cols-2">
         {/* Code */}
-        <div className={cn("flex min-w-0 flex-col", view !== "code" && "max-lg:hidden")}>
+        <div
+          className={cn("flex min-w-0 flex-col", view !== "code" && "max-lg:hidden")}
+          style={height ? { height } : undefined}
+        >
           <label htmlFor={codeId} className="sr-only">
             Email HTML
           </label>
@@ -156,54 +140,41 @@ export function HtmlEditor({
             autoCorrect="off"
             aria-describedby={`${uid}-keys`}
             placeholder="<p>Hi {{first_name | there}},</p>"
-            className="block w-full flex-1 resize-y border-0 bg-white p-4 font-mono text-[13px] leading-5 text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-600 focus:outline-none focus:ring-inset"
-            style={{ minHeight, tabSize: 2 }}
+            className={cn(
+              "block min-h-0 w-full flex-1 border-0 bg-white p-4 font-mono text-[13px] leading-5 text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-600 focus:outline-none focus:ring-inset",
+              height ? "resize-none" : "resize-y",
+            )}
+            style={height ? { tabSize: 2 } : { minHeight, tabSize: 2 }}
           />
-          <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-1.5 text-xs text-slate-500">
-            <p id={`${uid}-keys`}>
-              <Kbd>Tab</Kbd> indents · <Kbd>Esc</Kbd> then <Kbd>Tab</Kbd> leaves the editor
-            </p>
-            <span className="shrink-0 tabular-nums" title="HTML size">
-              {formatByteSize(size)}
-            </span>
-          </div>
+          <p id={`${uid}-keys`} className="sr-only">
+            Tab indents. Press Escape, then Tab, to leave the editor.
+          </p>
         </div>
 
         {/* Preview */}
         <section
           aria-label="Preview"
           className={cn(
-            "flex min-w-0 flex-col border-slate-200 bg-slate-100 lg:border-l",
+            "relative min-w-0 border-slate-200 bg-slate-100 lg:border-l",
             view !== "preview" && "max-lg:hidden",
           )}
-          style={{ minHeight }}
+          style={paneStyle}
         >
-          <div className="space-y-0.5 border-b border-slate-200 bg-white px-4 py-2 text-xs text-slate-500">
-            <p className="truncate">
-              Previewing as <span className="font-medium text-slate-700">{SAMPLE_NAME}</span> &lt;
-              {SAMPLE_CONTACT.email}&gt;
+          {settledHtml.trim() ? (
+            <PreviewFrame srcDoc={srcDoc} width={width} height="fill" />
+          ) : (
+            <p className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">
+              Nothing to preview yet
             </p>
-            {previewText ? (
-              <p className="truncate">
-                Preview text: <span className="text-slate-700">{previewText}</span>
-              </p>
-            ) : null}
-          </div>
-          <div className="relative flex-1">
-            {settledHtml.trim() ? (
-              <PreviewFrame srcDoc={srcDoc} width={width} height="fill" />
-            ) : (
-              <p className="absolute inset-0 flex items-center justify-center text-sm text-slate-400">
-                Nothing to preview yet
-              </p>
-            )}
-          </div>
+          )}
         </section>
       </div>
 
-      <div className="border-t border-slate-200 px-4 py-3">
-        <LintList issues={issues} />
-      </div>
+      {issues.length > 0 ? (
+        <div className="border-t border-slate-200 px-4 py-3">
+          <LintList issues={issues} />
+        </div>
+      ) : null}
 
       <input type="hidden" name={name} value={html} />
     </div>

@@ -57,29 +57,6 @@ export async function existingListIds(ids: string[]): Promise<string[]> {
   return unique.filter((id) => found.has(id));
 }
 
-/** The ids (in the given order) that still belong to an existing segment. */
-export async function existingSegmentIds(ids: string[]): Promise<string[]> {
-  const unique = [...new Set(ids)];
-  if (unique.length === 0) return [];
-  const { segments } = await collections();
-  const found = new Set(
-    (await segments.find({ _id: { $in: unique } }, { projection: { _id: 1 } }).toArray()).map((s) => s._id),
-  );
-  return unique.filter((id) => found.has(id));
-}
-
-/** Names of the given segments (deleted ones are skipped), alphabetically. */
-export async function getSegmentNames(segmentIds: string[]): Promise<{ id: string; name: string }[]> {
-  if (segmentIds.length === 0) return [];
-  const { segments } = await collections();
-  const rows = await segments
-    .find({ _id: { $in: [...new Set(segmentIds)] } }, { projection: { name: 1 } })
-    .collation(NAME_COLLATION)
-    .sort({ name: 1 })
-    .toArray();
-  return rows.map((s) => ({ id: s._id, name: s.name }));
-}
-
 /** Names of the given lists (deleted ones are skipped), alphabetically. */
 export async function getListNames(listIds: string[]): Promise<{ id: string; name: string }[]> {
   if (listIds.length === 0) return [];

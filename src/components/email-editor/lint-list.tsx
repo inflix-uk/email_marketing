@@ -36,49 +36,20 @@ function IssueIcon({ level }: { level: LintIssue["level"] }) {
   );
 }
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-
-/** The linter's findings, shown under the editor. */
+/** Problems found in hand-written HTML, shown under the HTML editor. Renders nothing when there are none. */
 export function LintList({ issues }: { issues: LintIssue[] }) {
-  const errors = issues.filter((i) => i.level === "error").length;
-  const warnings = issues.length - errors;
-  const summary = [errors ? plural(errors, "error") : "", warnings ? plural(warnings, "warning") : ""]
-    .filter(Boolean)
-    .join(", ");
-
-  if (issues.length === 0) {
-    return (
-      <p className="flex items-center gap-2 text-sm text-emerald-700" aria-live="polite">
-        <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden>
-          <path
-            fillRule="evenodd"
-            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
-            clipRule="evenodd"
-          />
-        </svg>
-        No problems found
-      </p>
-    );
-  }
-
+  if (issues.length === 0) return null;
   return (
-    <div>
-      <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase" aria-live="polite">
-        Checks: {summary}
-      </p>
-      <ul className="mt-2 space-y-1.5">
-        {issues.map((issue) => (
-          <li key={`${issue.level}:${issue.message}`} className="flex gap-2 text-sm">
-            <IssueIcon level={issue.level} />
-            <span className={issue.level === "error" ? "text-red-700" : "text-slate-700"}>
-              <span className="sr-only">{issue.level === "error" ? "Error: " : "Warning: "}</span>
-              {formatMessage(issue.message)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <ul className="space-y-1.5" aria-live="polite">
+      {issues.map((issue) => (
+        <li key={`${issue.level}:${issue.message}`} className="flex gap-2 text-sm">
+          <IssueIcon level={issue.level} />
+          <span className={issue.level === "error" ? "text-red-700" : "text-slate-700"}>
+            <span className="sr-only">{issue.level === "error" ? "Error: " : "Warning: "}</span>
+            {formatMessage(issue.message)}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }

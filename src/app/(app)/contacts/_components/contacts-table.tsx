@@ -3,13 +3,11 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { Alert, Input, Select } from "@/components/ui/form";
+import { Alert, Select } from "@/components/ui/form";
 import { Badge, StatusBadge, Table, TBody, Td, Th } from "@/components/ui/layout";
 import type { ContactStatus } from "@/db/schema";
-import type { BulkActionType } from "@/lib/contacts/bulk";
 import type { ContactFilters } from "@/lib/contacts/filters";
 import type { ListRef } from "@/lib/contacts/queries";
-import { MAX_TAG_LENGTH } from "@/lib/contacts/tags";
 import { formatDate, formatNumber } from "@/lib/utils";
 import { bulkContactsAction, type BulkActionInput, type BulkState } from "../actions";
 import { ClickableRow } from "./clickable-row";
@@ -22,18 +20,16 @@ export interface ContactRow {
   status: ContactStatus;
   createdAt: Date;
   lists: ListRef[];
-  tags: string[];
 }
 
+type ActionType = BulkActionInput["action"]["type"];
+
 const MAX_LIST_BADGES = 2;
-const MAX_TAG_BADGES = 3;
 const CHECKBOX = "h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600";
 
-const ACTION_LABELS: Record<BulkActionType, string> = {
+const ACTION_LABELS: Record<ActionType, string> = {
   add_to_list: "Add to list",
   remove_from_list: "Remove from list",
-  add_tag: "Add tag",
-  remove_tag: "Remove tag",
   unsubscribe: "Unsubscribe",
   delete: "Delete",
 };
@@ -44,7 +40,7 @@ function people(n: number): string {
 
 /**
  * The contacts table with row checkboxes and bulk actions. A selection is
- * either the ticked rows of this page or "everyone matching the filter"
+ * either the ticked rows of this page or "everyone matching the search"
  * (`allMatching`), which the server resolves from the filters itself.
  * Render it with a `key` that changes with the filters and the page.
  */
@@ -52,27 +48,21 @@ export function ContactsTable({
   rows,
   total,
   filters,
-  filtered,
   lists,
-  tags,
   empty,
 }: {
   rows: ContactRow[];
   /** Contacts matching the current filters, across all pages. */
   total: number;
   filters: ContactFilters;
-  filtered: boolean;
   lists: ListRef[];
-  /** Tags in use (suggested when adding / removing a tag). */
-  tags: string[];
   /** Shown instead of the table when no contact matches (the result of the last action stays visible). */
   empty: ReactNode;
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [allMatching, setAllMatching] = useState(false);
-  const [type, setType] = useState<BulkActionType>("add_to_list");
+  const [type, setType] = useState<ActionType>("add_to_list");
   const [listId, setListId] = useState(lists[0]?.id ?? "");
-  const [tag, setTag] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [state, setState] = useState<BulkState>({});
   const [pending, startTransition] = useTransition();
@@ -113,26 +103,21 @@ export function ContactsTable({
   }
 
   const needsList = type === "add_to_list" || type === "remove_from_list";
-  const needsTag = type === "add_tag" || type === "remove_tag";
   const needsConfirm = type === "delete" || type === "unsubscribe";
-  const ready = count > 0 && (!needsList || Boolean(listId)) && (!needsTag || Boolean(tag.trim()));
+  const ready = count > 0 && (!needsList || Boolean(listId));
 
   function run() {
-    const target: BulkActionInput["target"] = allMatching ? { filters } : { ids: onPage.map((r) => r.id) };
+    const target: BulkActionInput["target"] = allMatching
+      ? { filters: { q: filters.q, listId: filters.listId } }
+      : { ids: onPage.map((r) => r.id) };
     const action: BulkActionInput["action"] = needsList
       ? { type: type as "add_to_list" | "remove_from_list", listId }
-      : needsTag
-        ? { type: type as "add_tag" | "remove_tag", tag }
-        : { type: type as "unsubscribe" | "delete" };
+      : { type: type as "unsubscribe" | "delete" };
     startTransition(async () => {
       const result = await bulkContactsAction({ target, action });
       setState(result);
-      if (!result.error) {
-        clear();
-        setTag("");
-      } else {
-        setConfirming(false);
-      }
+      if (!result.error) clear();
+      else setConfirming(false);
     });
   }
 
@@ -162,8 +147,7 @@ export function ContactsTable({
         <div className="space-y-3 border-b border-slate-200 bg-indigo-50/60 px-4 py-3" role="region" aria-label="Bulk actions">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <p className="text-sm text-slate-700" aria-live="polite">
-              <span className="font-medium text-slate-900">{people(count)} selected</span>
-              {allMatching ? (filtered ? " (everyone matching this filter)" : " (all contacts)") : null}
+              <span className="font-medium text-slate-900">{formatNumber(count)} selected</span>
               {!allMatching && pageSelected && total > rows.length ? (
                 <>
                   {" · "}
@@ -175,13 +159,13 @@ export function ContactsTable({
                     }}
                     className="font-medium text-indigo-600 hover:text-indigo-500"
                   >
-                    {filtered ? `Select all ${people(total)} matching this filter` : `Select all ${people(total)}`}
+                    Select all {formatNumber(total)}
                   </button>
                 </>
               ) : null}
               {" · "}
               <button type="button" onClick={clear} className="font-medium text-indigo-600 hover:text-indigo-500">
-                Clear selection
+                Clear
               </button>
             </p>
 
@@ -193,13 +177,13 @@ export function ContactsTable({
                 id="bulk-action"
                 value={type}
                 onChange={(e) => {
-                  setType(e.target.value as BulkActionType);
+                  setType(e.target.value as ActionType);
                   setConfirming(false);
                 }}
                 disabled={pending}
                 className="sm:w-44"
               >
-                {(Object.keys(ACTION_LABELS) as BulkActionType[]).map((t) => (
+                {(Object.keys(ACTION_LABELS) as ActionType[]).map((t) => (
                   <option key={t} value={t}>
                     {ACTION_LABELS[t]}
                   </option>
@@ -228,37 +212,6 @@ export function ContactsTable({
                   </span>
                 )
               ) : null}
-              {needsTag ? (
-                <>
-                  <label htmlFor="bulk-tag" className="sr-only">
-                    Tag
-                  </label>
-                  <Input
-                    id="bulk-tag"
-                    value={tag}
-                    onChange={(e) => setTag(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        apply();
-                      }
-                    }}
-                    list={tags.length > 0 ? "bulk-tag-suggestions" : undefined}
-                    placeholder="Tag, e.g. vip"
-                    maxLength={MAX_TAG_LENGTH}
-                    autoComplete="off"
-                    disabled={pending}
-                    className="sm:w-44"
-                  />
-                  {tags.length > 0 ? (
-                    <datalist id="bulk-tag-suggestions">
-                      {tags.map((t) => (
-                        <option key={t} value={t} />
-                      ))}
-                    </datalist>
-                  ) : null}
-                </>
-              ) : null}
               {confirming ? null : (
                 <Button type="button" onClick={apply} disabled={pending || !ready} variant={type === "delete" ? "danger" : "primary"}>
                   {pending ? "Working..." : "Apply"}
@@ -268,30 +221,17 @@ export function ContactsTable({
           </div>
 
           {confirming ? (
-            <div className="space-y-3 rounded-md bg-red-50 p-4 ring-1 ring-inset ring-red-200">
+            <div className="flex flex-col gap-3 rounded-md bg-red-50 p-3 ring-1 ring-inset ring-red-200 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-red-800">
-                {type === "delete" ? (
-                  <>
-                    Delete <strong>{people(count)}</strong>? This permanently removes them, their list memberships and their
-                    campaign history. It can&apos;t be undone. To stop emailing people, unsubscribe them instead - deleted
-                    contacts can be re-added by a later import.
-                  </>
-                ) : (
-                  <>
-                    Unsubscribe <strong>{people(count)}</strong>? They won&apos;t receive any more campaigns. Contacts that are
-                    already unsubscribed or bounced stay as they are.
-                  </>
-                )}
+                {type === "delete"
+                  ? `Delete ${people(count)}? This can't be undone.`
+                  : `Unsubscribe ${people(count)}? They won't get any more emails.`}
               </p>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="danger" onClick={run} disabled={pending} autoFocus>
-                  {pending
-                    ? type === "delete"
-                      ? "Deleting..."
-                      : "Unsubscribing..."
-                    : `Yes, ${type === "delete" ? "delete" : "unsubscribe"} ${people(count)}`}
+              <div className="flex shrink-0 gap-2">
+                <Button type="button" variant="danger" size="sm" onClick={run} disabled={pending} autoFocus>
+                  {pending ? "Working..." : type === "delete" ? "Yes, delete" : "Yes, unsubscribe"}
                 </Button>
-                <Button type="button" variant="secondary" onClick={() => setConfirming(false)} disabled={pending}>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(false)} disabled={pending}>
                   Cancel
                 </Button>
               </div>
@@ -321,7 +261,6 @@ export function ContactsTable({
             <Th className="hidden sm:table-cell">Name</Th>
             <Th>Status</Th>
             <Th className="hidden lg:table-cell">Lists</Th>
-            <Th className="hidden xl:table-cell">Tags</Th>
             <Th className="hidden md:table-cell">Added</Th>
           </tr>
         </thead>
@@ -329,7 +268,6 @@ export function ContactsTable({
           {rows.map((c) => {
             const name = [c.firstName, c.lastName].filter(Boolean).join(" ");
             const extraLists = c.lists.length - MAX_LIST_BADGES;
-            const extraTags = c.tags.length - MAX_TAG_BADGES;
             const checked = allMatching || selected.has(c.id);
             return (
               <ClickableRow key={c.id} href={`/contacts/${c.id}`} className={checked ? "bg-indigo-50/40" : undefined}>
@@ -341,7 +279,7 @@ export function ContactsTable({
                       checked={checked}
                       onChange={(e) => {
                         if (allMatching) {
-                          // Leaving "all matching": fall back to this page minus the row that was unticked.
+                          // Leaving "select all": fall back to this page minus the row that was unticked.
                           setAllMatching(false);
                           setConfirming(false);
                           setSelected(new Set(rows.filter((r) => r.id !== c.id).map((r) => r.id)));
@@ -377,24 +315,6 @@ export function ContactsTable({
                       {extraLists > 0 ? (
                         <span title={c.lists.slice(MAX_LIST_BADGES).map((l) => l.name).join(", ")}>
                           <Badge>+{extraLists}</Badge>
-                        </span>
-                      ) : null}
-                    </div>
-                  )}
-                </Td>
-                <Td className="hidden xl:table-cell">
-                  {c.tags.length === 0 ? (
-                    <span className="text-slate-400">—</span>
-                  ) : (
-                    <div className="flex flex-wrap gap-1">
-                      {c.tags.slice(0, MAX_TAG_BADGES).map((t) => (
-                        <Link key={t} href={`/contacts?tag=${encodeURIComponent(t)}`} title={`Show contacts tagged ${t}`}>
-                          <Badge>{t}</Badge>
-                        </Link>
-                      ))}
-                      {extraTags > 0 ? (
-                        <span title={c.tags.slice(MAX_TAG_BADGES).join(", ")}>
-                          <Badge>+{extraTags}</Badge>
                         </span>
                       ) : null}
                     </div>

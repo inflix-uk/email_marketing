@@ -1,15 +1,14 @@
 "use client";
 
-// Shared email editing & preview components (used by templates and campaigns).
-//
-//   <EmailEditor name="html" defaultValue={html} previewText={previewText} />
-//     Code editor + live preview + lint checks; submits its HTML through a
-//     hidden <input name="html"> so it works inside any <form>.
+// Shared email editing & preview components.
 //
 //   <EmailEditor name="html" defaultValue={html} designName="design" defaultDesign={design} />
-//     Adds the visual (block) editor. Also submits the design JSON through a
-//     hidden <input name="design"> - "" when the email is hand-written HTML.
-//     On the server: parseDesign() / renderDesign() from "@/lib/email-design".
+//     Visual (block) editor with a live preview; can be switched to HTML code.
+//     Submits the HTML through a hidden <input name="html"> and the design JSON
+//     through <input name="design"> ("" once the email is hand-written HTML),
+//     so it works inside any <form>. On the server: parseDesign() /
+//     renderDesign() / serializeDesign() from "@/lib/email-design".
+//     Without `designName` it is an HTML-only code editor.
 //
 //   <EmailPreview html={html} width="mobile" height={600} />
 //     Sandboxed, read-only preview with merge tags filled from SAMPLE_CONTACT.

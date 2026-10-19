@@ -34,13 +34,17 @@ export function EmailPreview({ html, width = "desktop", height, className }: Ema
   );
 }
 
+const NO_SCROLL_STYLE = "<style>html,body{overflow:hidden!important;scrollbar-width:none!important}</style>";
+
 /**
  * Scaled-down, non-interactive snapshot of an email for cards and pickers.
  * Size it with `className` (e.g. "aspect-[4/3]"); the email is rendered at
  * 2.5x the box width and scaled to 40%, so it always shows the desktop layout.
  */
 export function EmailThumbnail({ html, className }: { html: string; className?: string }) {
-  const srcDoc = useMemo(() => buildPreviewDocument(html), [html]);
+  // A thumbnail shows the top of the email only: never a scrollbar. A <style>
+  // after the content still applies (the parser moves it into <body>).
+  const srcDoc = useMemo(() => buildPreviewDocument(html) + NO_SCROLL_STYLE, [html]);
 
   return (
     <div className={cn("relative overflow-hidden bg-slate-100", className)} aria-hidden inert>
@@ -49,6 +53,7 @@ export function EmailThumbnail({ html, className }: { html: string; className?: 
           title="Email thumbnail"
           srcDoc={srcDoc}
           sandbox=""
+          scrolling="no"
           loading="lazy"
           tabIndex={-1}
           className="pointer-events-none absolute top-0 left-0 h-[250%] w-[250%] origin-top-left scale-[0.4] border-0 bg-white"

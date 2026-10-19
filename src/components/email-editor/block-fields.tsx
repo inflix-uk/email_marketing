@@ -121,28 +121,22 @@ function ImageFields({ idPrefix, block, onChange }: FieldsProps<ImageBlock>) {
         <div className="flex items-center gap-3 rounded-md bg-slate-50 p-2 ring-1 ring-slate-200 ring-inset">
           {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary external or uploaded image */}
           <img src={src} alt="" className="h-14 w-14 shrink-0 rounded bg-white object-contain ring-1 ring-slate-200" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs text-slate-600" title={src}>
-              {src}
-            </p>
-            <button
-              type="button"
-              onClick={() => onChange({ ...block, src: "" })}
-              className="mt-0.5 rounded text-xs font-medium text-red-600 hover:text-red-500 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600"
-            >
-              Remove image
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => onChange({ ...block, src: "" })}
+            className="rounded text-xs font-medium text-red-600 hover:text-red-500 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600"
+          >
+            Remove image
+          </button>
         </div>
       ) : null}
 
       <ImagePicker value={block.src} onPick={(url) => onChange({ ...block, src: url })} />
 
       <FieldRow
-        label="Image address"
+        label="Or paste an image link"
         htmlFor={`${idPrefix}-src`}
-        hint="Filled in when you upload or pick an image. You can also paste the address of an image hosted elsewhere."
-        warning={unusable ? "Use a full address starting with https:// - this image will be left out." : undefined}
+        warning={unusable ? "Use a full link starting with https://" : undefined}
       >
         <input
           id={`${idPrefix}-src`}
@@ -161,18 +155,16 @@ function ImageFields({ idPrefix, block, onChange }: FieldsProps<ImageBlock>) {
 
       <TextField
         id={`${idPrefix}-alt`}
-        label="Alt text"
+        label="Image description"
         value={block.alt}
         onChange={(alt) => onChange({ ...block, alt })}
-        placeholder="Describe the image"
-        hint="Shown when images are blocked and read out by screen readers. Leave empty for decorative images."
+        placeholder="Shown if the image doesn't load"
       />
       <UrlField
         id={`${idPrefix}-link`}
         label="Link (optional)"
         value={block.link}
         onChange={(link) => onChange({ ...block, link })}
-        hint="Where a click on the image goes."
       />
       <RangeField
         id={`${idPrefix}-width`}
@@ -231,12 +223,11 @@ function FooterFields({ idPrefix, block, onChange }: FieldsProps<FooterBlock>) {
   return (
     <>
       <p className="text-xs text-slate-500">
-        Every email ends with your company address and an unsubscribe link, so the footer can&apos;t be removed. The
-        address comes from{" "}
+        Always includes your address (from{" "}
         <Link href="/settings" className="font-medium text-indigo-600 hover:text-indigo-500">
           Settings
         </Link>
-        .
+        ) and an unsubscribe link.
       </p>
       <RichTextField
         id={`${idPrefix}-text`}
@@ -273,7 +264,6 @@ function ColumnsFields({
 }: FieldsProps<ColumnsBlock> & { newId: () => string }) {
   return (
     <>
-      <p className="text-xs text-slate-500">Two columns side by side. On phones the right column moves below the left.</p>
       {([0, 1] as ColumnIndex[]).map((column) => {
         const children = block.columns[column].blocks;
         const name = COLUMN_NAMES[column];
@@ -458,13 +448,10 @@ export function StylesFields({
       />
       <ColorField
         id={`${idPrefix}-accent`}
-        label="Accent colour"
+        label="Link and button colour"
         value={styles.accentColor}
         onChange={(accentColor) => onChange({ accentColor })}
       />
-      <p className="text-xs text-slate-500">
-        The accent colour is used for links and buttons. Fonts are limited to ones every mail app has.
-      </p>
     </div>
   );
 }

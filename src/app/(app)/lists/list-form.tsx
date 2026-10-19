@@ -2,65 +2,54 @@
 
 import { useActionState } from "react";
 import { SubmitButton } from "@/components/ui/button";
-import { Alert, Field, Input, Textarea } from "@/components/ui/form";
+import { Alert, Input, Label } from "@/components/ui/form";
 import type { ListFormState } from "./actions";
 
-/** Name + description form, used to create a list and to edit one. */
+/** One-line list name form: creates a list, or renames one. */
 export function ListForm({
   action,
-  initial = { name: "", description: "" },
+  initialName = "",
+  label,
   submitLabel,
   pendingLabel,
   idPrefix,
 }: {
   action: (state: ListFormState, formData: FormData) => Promise<ListFormState>;
-  initial?: { name: string; description: string };
+  initialName?: string;
+  label: string;
   submitLabel: string;
   pendingLabel: string;
   /** Keeps input ids unique when two forms are on one page. */
   idPrefix: string;
 }) {
   const [state, formAction] = useActionState(action, {});
-  // React resets the form after each action; on errors the typed values come
-  // back in `state.values`, otherwise the (revalidated) saved values are used.
-  const values = state.values ?? initial;
-  const errors = state.fieldErrors ?? {};
+  // React resets the form after each action; on errors the typed name comes
+  // back in `state.values`, otherwise the (revalidated) saved name is used.
+  const name = state.values?.name ?? initialName;
+  const error = state.fieldErrors?.name ?? state.error;
 
   return (
-    <form action={formAction} className="space-y-4">
-      {state.error ? <Alert tone="error">{state.error}</Alert> : null}
-      {state.ok ? <Alert tone="success">List saved.</Alert> : null}
-      <Field label="Name" htmlFor={`${idPrefix}-name`} error={errors.name}>
+    <form action={formAction} className="space-y-1.5">
+      <Label htmlFor={`${idPrefix}-name`}>{label}</Label>
+      <div className="flex gap-2">
         <Input
           id={`${idPrefix}-name`}
           name="name"
           required
           maxLength={100}
-          defaultValue={values.name}
+          defaultValue={name}
           placeholder="e.g. Newsletter"
-          aria-invalid={errors.name ? true : undefined}
+          aria-invalid={error ? true : undefined}
+          className="min-w-0"
         />
-      </Field>
-      <Field
-        label={
-          <>
-            Description <span className="font-normal text-slate-400">(optional)</span>
-          </>
-        }
-        htmlFor={`${idPrefix}-description`}
-        error={errors.description}
-        hint="For your team - subscribers don't see it."
-      >
-        <Textarea
-          id={`${idPrefix}-description`}
-          name="description"
-          rows={2}
-          maxLength={500}
-          defaultValue={values.description}
-          placeholder="Who is on this list and what they signed up for"
-        />
-      </Field>
-      <SubmitButton pendingText={pendingLabel}>{submitLabel}</SubmitButton>
+        <SubmitButton pendingText={pendingLabel}>{submitLabel}</SubmitButton>
+      </div>
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+      {state.ok ? (
+        <Alert tone="success" className="py-2">
+          Saved.
+        </Alert>
+      ) : null}
     </form>
   );
 }

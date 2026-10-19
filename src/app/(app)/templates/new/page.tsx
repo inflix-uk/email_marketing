@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHeader } from "@/components/ui/layout";
-import { NewTemplateForm } from "./new-template-form";
+import { StarterPicker } from "../starter-picker";
 
 export const metadata: Metadata = { title: "New template" };
 
@@ -15,9 +15,9 @@ export default function NewTemplatePage() {
           </Link>
         }
         title="New template"
-        description="Choose a starting point and give your template a name."
+        description="Pick a design to start from."
       />
-      <NewTemplateForm />
+      <StarterPicker />
     </>
   );
 }

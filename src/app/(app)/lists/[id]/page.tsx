@@ -4,13 +4,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Button, ButtonLink, SubmitButton } from "@/components/ui/button";
 import { Input } from "@/components/ui/form";
-import { Card, CardBody, CardHeader, PageHeader, Stat, StatusBadge, Table, TBody, Td, Th } from "@/components/ui/layout";
+import { Card, CardBody, CardHeader, StatusBadge, Table, TBody, Td, Th, PageHeader } from "@/components/ui/layout";
 import { parsePage } from "@/lib/contacts/filters";
 import { findListMembers, getList, getListStats } from "@/lib/contacts/queries";
-import { formatDate, formatNumber } from "@/lib/utils";
+import { formatNumber } from "@/lib/utils";
 import { ClickableRow } from "../../contacts/_components/clickable-row";
 import { ConfirmDelete } from "../../contacts/_components/confirm-delete";
-import { DownloadLink } from "../../contacts/_components/download-link";
 import { Pagination } from "../../contacts/_components/pagination";
 import { addEmailsAction, deleteListAction, removeMemberAction, updateListAction } from "../actions";
 import { ListForm } from "../list-form";
@@ -40,47 +39,37 @@ export default async function ListPage({ params, searchParams }: Props) {
     <>
       <PageHeader
         title={list.name}
-        description={list.description ?? undefined}
+        description={`${formatNumber(stats.subscribed)} subscribed · ${formatNumber(stats.total)} total`}
         back={
           <Link href="/lists" className="text-slate-500 hover:text-slate-700">
             &larr; Lists
           </Link>
         }
-        actions={
-          <>
-            {stats.total > 0 ? <DownloadLink href={`/api/contacts/export?list=${id}`}>Export CSV</DownloadLink> : null}
-            <ButtonLink href={`/contacts/import?list=${id}`} variant="secondary">
-              Import CSV into this list
-            </ButtonLink>
-          </>
-        }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <Stat label="Subscribed" value={formatNumber(stats.subscribed)} hint="Will receive campaigns" />
-        <Stat label="Pending" value={formatNumber(stats.pending)} hint="Not confirmed yet" />
-        <Stat label="Unsubscribed" value={formatNumber(stats.unsubscribed)} />
-        <Stat label="Bounced / complained" value={formatNumber(stats.bounced)} />
-        <Stat label="Total members" value={formatNumber(stats.total)} />
-      </div>
+      {/* Wide screens: members on the left, the small forms on the right. Phones: "Add people" first. */}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_1fr]">
+        <Card className="lg:col-start-2 lg:row-start-1">
+          <CardHeader title="Add people" />
+          <CardBody className="space-y-3">
+            <AddEmailsForm action={addEmailsAction.bind(null, id)} />
+            <p className="text-sm text-slate-500">
+              Or{" "}
+              <Link href={`/contacts/import?list=${id}`} className="font-medium text-indigo-600 hover:text-indigo-500">
+                import a CSV file
+              </Link>
+            </p>
+          </CardBody>
+        </Card>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="self-start lg:col-span-2">
-          <CardHeader
-            title="Members"
-            description={
-              q
-                ? `${formatNumber(members.total)} matching “${q}”`
-                : `${formatNumber(members.total)} ${members.total === 1 ? "contact" : "contacts"}`
-            }
-          />
+        <Card className="self-start lg:col-start-1 lg:row-span-2 lg:row-start-1">
           {stats.total > 0 ? (
             <div className="border-b border-slate-200 px-4 py-3">
               <Form action={`/lists/${id}`} role="search" className="flex gap-2">
                 <label htmlFor="member-search" className="sr-only">
-                  Search members
+                  Search this list
                 </label>
-                <Input id="member-search" name="q" type="search" defaultValue={q} placeholder="Search by email or name..." />
+                <Input id="member-search" name="q" type="search" defaultValue={q} placeholder="Search by email or name..." className="sm:w-72" />
                 <Button type="submit" variant="secondary">
                   Search
                 </Button>
@@ -94,29 +83,18 @@ export default async function ListPage({ params, searchParams }: Props) {
           ) : null}
 
           {members.rows.length === 0 ? (
-            <div className="px-6 py-12 text-center">
+            <p className="px-6 py-12 text-center text-sm text-slate-500">
               {q ? (
                 <>
-                  <p className="text-sm font-medium text-slate-900">No members match “{q}”</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    <Link href={`/lists/${id}`} className="font-medium text-indigo-600 hover:text-indigo-500">
-                      Show all members
-                    </Link>
-                  </p>
+                  No one matches “{q}”.{" "}
+                  <Link href={`/lists/${id}`} className="font-medium text-indigo-600 hover:text-indigo-500">
+                    Show all
+                  </Link>
                 </>
               ) : (
-                <>
-                  <p className="text-sm font-medium text-slate-900">This list is empty</p>
-                  <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">
-                    Paste email addresses in the form on the right, or{" "}
-                    <Link href={`/contacts/import?list=${id}`} className="font-medium text-indigo-600 hover:text-indigo-500">
-                      import a CSV
-                    </Link>{" "}
-                    straight into this list.
-                  </p>
-                </>
+                "No one on this list yet."
               )}
-            </div>
+            </p>
           ) : (
             <Table>
               <thead className="bg-slate-50">
@@ -124,9 +102,8 @@ export default async function ListPage({ params, searchParams }: Props) {
                   <Th>Email</Th>
                   <Th className="hidden sm:table-cell">Name</Th>
                   <Th>Status</Th>
-                  <Th className="hidden md:table-cell">Added</Th>
                   <Th>
-                    <span className="sr-only">Actions</span>
+                    <span className="sr-only">Remove</span>
                   </Th>
                 </tr>
               </thead>
@@ -144,7 +121,6 @@ export default async function ListPage({ params, searchParams }: Props) {
                       <Td>
                         <StatusBadge status={m.status} />
                       </Td>
-                      <Td className="hidden whitespace-nowrap text-slate-500 md:table-cell">{formatDate(m.createdAt)}</Td>
                       <Td className="text-right">
                         <form action={removeMemberAction.bind(null, id, m.id)}>
                           <SubmitButton variant="ghost" size="sm" pendingText="Removing..." aria-label={`Remove ${m.email} from this list`}>
@@ -174,48 +150,23 @@ export default async function ListPage({ params, searchParams }: Props) {
           />
         </Card>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader title="Add contacts" />
-            <CardBody className="space-y-3">
-              <AddEmailsForm action={addEmailsAction.bind(null, id)} />
-              <p className="text-xs text-slate-500">
-                Have a spreadsheet?{" "}
-                <Link href={`/contacts/import?list=${id}`} className="font-medium text-indigo-600 hover:text-indigo-500">
-                  Import a CSV into this list
-                </Link>
-                .
-              </p>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader title="List details" />
-            <CardBody>
-              <ListForm
-                action={updateListAction.bind(null, id)}
-                initial={{ name: list.name, description: list.description ?? "" }}
-                submitLabel="Save"
-                pendingLabel="Saving..."
-                idPrefix="edit-list"
-              />
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader title="Delete list" />
-            <CardBody className="space-y-3">
-              <p className="text-sm text-slate-600">
-                Contacts are kept - only their membership of this list is removed.
-              </p>
-              <ConfirmDelete action={deleteListAction.bind(null, id)} label="Delete list" confirmLabel="Yes, delete list">
-                Delete <strong>{list.name}</strong>? Its {formatNumber(stats.total)}{" "}
-                {stats.total === 1 ? "contact stays" : "contacts stay"} in your contacts, and campaigns that targeted this
-                list will no longer include it. This can&apos;t be undone.
+        <Card className="self-start lg:col-start-2 lg:row-start-2">
+          <CardBody className="space-y-4">
+            <ListForm
+              action={updateListAction.bind(null, id)}
+              initialName={list.name}
+              label="Name"
+              submitLabel="Save"
+              pendingLabel="Saving..."
+              idPrefix="edit-list"
+            />
+            <div className="border-t border-slate-200 pt-4">
+              <ConfirmDelete action={deleteListAction.bind(null, id)} label="Delete list" confirmLabel="Yes, delete" className="w-full">
+                Delete this list? The people on it stay in your contacts.
               </ConfirmDelete>
-            </CardBody>
-          </Card>
-        </div>
+            </div>
+          </CardBody>
+        </Card>
       </div>
     </>
   );

@@ -4,17 +4,16 @@ import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { Alert } from "@/components/ui/form";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { INVITE_LINK_DAYS, listTeam, requireSession } from "@/lib/auth";
-import { formatDate } from "@/lib/utils";
 import { removeTeammateAction, signOutEverywhereAction } from "./actions";
 import { AddTeammateForm, TeamTable } from "./team-forms";
 
 export const metadata: Metadata = { title: "Team" };
 
 const NOTICES: Record<string, { tone: "success" | "error"; text: string }> = {
-  removed: { tone: "success", text: "Teammate removed. They have been signed out." },
+  removed: { tone: "success", text: "Removed. They have been signed out." },
   self: { tone: "error", text: "You can't remove your own account." },
   last: { tone: "error", text: "You can't remove the last account." },
-  gone: { tone: "error", text: "That teammate was already removed." },
+  gone: { tone: "error", text: "That person was already removed." },
 };
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -36,7 +35,7 @@ export default async function TeamPage({
   const notice = toRemove ? undefined : NOTICES[first(query.notice) ?? ""];
 
   return (
-    <div className="max-w-3xl">
+    <>
       <PageHeader
         title="Team"
         description="Everyone here can sign in and use the whole account."
@@ -54,8 +53,8 @@ export default async function TeamPage({
           <form action={removeTeammateAction} className="space-y-3 rounded-md bg-red-50 p-4 ring-1 ring-inset ring-red-200">
             <input type="hidden" name="id" value={toRemove.id} />
             <p className="text-sm text-red-800">
-              Remove <strong>{toRemove.email}</strong>? They will be signed out and won&apos;t be able to sign in any more.
-              Contacts and campaigns are not affected.
+              Remove <strong>{toRemove.email}</strong>? They won&apos;t be able to sign in any more. Contacts and campaigns
+              stay as they are.
             </p>
             <div className="flex flex-wrap gap-2">
               <SubmitButton variant="danger" pendingText="Removing...">
@@ -68,45 +67,35 @@ export default async function TeamPage({
           </form>
         ) : null}
 
-        <Card>
-          <CardHeader title="Teammates" />
-          <TeamTable
-            linkDays={INVITE_LINK_DAYS}
-            rows={team.map((m) => ({
-              id: m.id,
-              email: m.email,
-              name: m.name,
-              added: formatDate(m.createdAt),
-              pending: m.pending,
-              isYou: m.email === session.email,
-            }))}
-          />
-        </Card>
+        <div className="grid items-start gap-6 xl:grid-cols-2">
+          <Card>
+            <TeamTable
+              linkDays={INVITE_LINK_DAYS}
+              rows={team.map((m) => ({
+                id: m.id,
+                email: m.email,
+                name: m.name,
+                pending: m.pending,
+                isYou: m.email === session.email,
+              }))}
+            />
+          </Card>
 
-        <Card>
-          <CardHeader
-            title="Add teammate"
-            description={`They get a link to set their own password. The link works for ${INVITE_LINK_DAYS} days.`}
-          />
-          <CardBody>
-            <AddTeammateForm linkDays={INVITE_LINK_DAYS} />
-          </CardBody>
-        </Card>
+          <Card>
+            <CardHeader title="Add someone" description="They get a link to set their own password." />
+            <CardBody>
+              <AddTeammateForm linkDays={INVITE_LINK_DAYS} />
+            </CardBody>
+          </Card>
+        </div>
 
-        <Card>
-          <CardHeader
-            title="Sign out everywhere"
-            description="Signs you out on every device, including this one. Use it if you lost a device or signed in on a shared computer."
-          />
-          <CardBody>
-            <form action={signOutEverywhereAction}>
-              <SubmitButton variant="secondary" pendingText="Signing out...">
-                Sign out everywhere
-              </SubmitButton>
-            </form>
-          </CardBody>
-        </Card>
+        <form action={signOutEverywhereAction} className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
+          <span>Lost a device?</span>
+          <SubmitButton variant="ghost" size="sm" pendingText="Signing out...">
+            Sign me out everywhere
+          </SubmitButton>
+        </form>
       </div>
-    </div>
+    </>
   );
 }

@@ -2,141 +2,64 @@ import Link from "next/link";
 import { PageHeader, StatusBadge } from "@/components/ui/layout";
 import type { Campaign } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
-import { getSegmentOptions } from "@/lib/segments";
-import { countRecipients, getCampaignProblems } from "@/lib/sending";
-import { lintEmailHtml } from "@/lib/templates/lint";
-import { formatDateTime, formatNumber } from "@/lib/utils";
-import { deleteCampaign, duplicateCampaign, unscheduleCampaign } from "../actions";
+import { deleteCampaign, unscheduleCampaign, type ComposeNotice } from "../actions";
 import { ActionButton, ConfirmButton } from "../_components/action-buttons";
+import { ComposeForm } from "../_components/compose-form";
 import { LocalDateTime } from "../_components/local-time";
-import { getListsWithCounts } from "../_lib/queries";
-import { EditorForm } from "./editor-form";
-import { EditorStateProvider } from "./editor-state";
-import { ReviewPanel } from "./review-panel";
+import { getComposeData } from "../_lib/compose-data";
+import { displaySubject } from "../_lib/display";
+
+const NOTICES: ComposeNotice[] = ["saved", "test-sent", "test-failed", "scheduled"];
 
 /** /campaigns/[id] for draft and scheduled campaigns. */
-export async function CampaignEditor({ campaign }: { campaign: Campaign }) {
-  const [session, lists, segments, problems] = await Promise.all([
-    requireSession(),
-    getListsWithCounts(),
-    getSegmentOptions(),
-    getCampaignProblems(campaign.id),
-  ]);
-  // Ignore ids of lists and segments deleted since the campaign was saved.
-  const listIdSet = new Set(lists.map((l) => l.id));
-  const segmentIdSet = new Set(segments.map((s) => s.id));
-  const selectedListIds = (campaign.listIds ?? []).filter((id) => listIdSet.has(id));
-  const selectedSegmentIds = (campaign.segmentIds ?? []).filter((id) => segmentIdSet.has(id));
-  const recipients =
-    selectedListIds.length + selectedSegmentIds.length ? await countRecipients(selectedListIds, selectedSegmentIds) : 0;
-  const lintIssues = lintEmailHtml(campaign.html);
+export async function CampaignEditor({ campaign, notice }: { campaign: Campaign; notice?: string }) {
+  const [session, data] = await Promise.all([requireSession(), getComposeData(campaign)]);
 
   return (
-    <EditorStateProvider>
+    <>
       <PageHeader
         back={
           <Link href="/campaigns" className="font-medium text-slate-500 hover:text-slate-700">
             &larr; Campaigns
           </Link>
         }
-        title={campaign.name}
-        description={
-          <span className="inline-flex flex-wrap items-center gap-2">
-            <StatusBadge status={campaign.status} />
-            <span>Last edited {formatDateTime(campaign.updatedAt)}</span>
-          </span>
-        }
+        title={displaySubject(campaign.subject) || "Untitled campaign"}
+        description={<StatusBadge status={campaign.status} />}
         actions={
-          <>
-            <ActionButton action={duplicateCampaign.bind(null, campaign.id)} pendingText="Duplicating...">
-              Duplicate
-            </ActionButton>
-            {campaign.status === "draft" ? (
-              <ConfirmButton
-                action={deleteCampaign.bind(null, campaign.id)}
-                label="Delete"
-                variant="ghost"
-                title="Delete this draft?"
-                description={
-                  <p>
-                    &ldquo;{campaign.name}&rdquo; will be deleted permanently. This can&apos;t be undone.
-                  </p>
-                }
-                confirmLabel="Delete draft"
-                pendingText="Deleting..."
-              />
-            ) : null}
-          </>
+          campaign.status === "draft" ? (
+            <ConfirmButton
+              action={deleteCampaign.bind(null, campaign.id)}
+              label="Delete"
+              variant="ghost"
+              title="Delete this draft?"
+              confirmLabel="Delete"
+              pendingText="Deleting..."
+            />
+          ) : null
         }
       />
 
       {campaign.status === "scheduled" && campaign.scheduledAt ? (
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-lg bg-sky-50 px-5 py-4 ring-1 ring-inset ring-sky-200">
-          <div className="flex items-start gap-3">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-              className="mt-0.5 h-5 w-5 shrink-0 text-sky-600"
-            >
-              <path d="M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div>
-              <p className="text-sm font-semibold text-sky-900">
-                Scheduled for <LocalDateTime value={campaign.scheduledAt.toISOString()} />
-              </p>
-              <p className="mt-0.5 text-sm text-sky-800">
-                It will go out automatically to about {formatNumber(recipients)}{" "}
-                {recipients === 1 ? "recipient" : "recipients"}. You can keep editing until then.
-              </p>
-            </div>
-          </div>
-          <ActionButton action={unscheduleCampaign.bind(null, campaign.id)} pendingText="Unscheduling...">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-sky-50 px-5 py-3 ring-1 ring-inset ring-sky-200">
+          <p className="text-sm text-sky-900">
+            Goes out <strong className="font-semibold"><LocalDateTime value={campaign.scheduledAt.toISOString()} /></strong>
+          </p>
+          <ActionButton action={unscheduleCampaign.bind(null, campaign.id)} pendingText="Unscheduling..." size="sm">
             Unschedule
           </ActionButton>
         </div>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <EditorForm
-          campaignId={campaign.id}
-          defaults={{
-            name: campaign.name,
-            subject: campaign.subject,
-            previewText: campaign.previewText ?? "",
-            fromName: campaign.fromName,
-            fromEmail: campaign.fromEmail,
-            replyTo: campaign.replyTo ?? "",
-            html: campaign.html,
-            design: campaign.design ?? null,
-            abTest: campaign.abTest
-              ? {
-                  subjectB: campaign.abTest.subjectB,
-                  testPercent: campaign.abTest.testPercent,
-                  waitHours: campaign.abTest.waitHours,
-                }
-              : null,
-          }}
-          lists={lists}
-          segments={segments}
-          selectedListIds={selectedListIds}
-          selectedSegmentIds={selectedSegmentIds}
-          recipientCount={recipients}
-        />
-        <aside aria-label="Review and send" className="lg:col-start-3 lg:row-start-1">
-          <ReviewPanel
-            campaign={campaign}
-            problems={problems}
-            lintIssues={lintIssues}
-            recipients={recipients}
-            defaultTestEmail={session.email}
-          />
-        </aside>
-      </div>
-    </EditorStateProvider>
+      <ComposeForm
+        // Remount after saves that changed the stored campaign (e.g. scheduling).
+        key={`${campaign.status}-${campaign.scheduledAt?.toISOString() ?? ""}`}
+        campaignId={campaign.id}
+        initialSubject={campaign.subject}
+        scheduledAt={campaign.scheduledAt ? campaign.scheduledAt.toISOString() : null}
+        data={data}
+        defaultTestTo={session.email}
+        notice={NOTICES.find((n) => n === notice)}
+      />
+    </>
   );
 }

@@ -17,8 +17,6 @@ import {
   type EditorAction,
   type EmailDesign,
 } from "@/lib/email-design";
-import { SAMPLE_CONTACT } from "@/lib/render";
-import { formatByteSize, htmlByteSize, lintEmailHtml } from "@/lib/templates/lint";
 import { buildPreviewDocument } from "@/lib/templates/preview";
 import { cn } from "@/lib/utils";
 import { BlockFields, StylesFields } from "./block-fields";
@@ -38,7 +36,6 @@ import {
   TrashIcon,
 } from "./controls";
 import { ImageLibraryProvider } from "./image-picker";
-import { LintList } from "./lint-list";
 import { PreviewFrame, type PreviewWidth } from "./preview-frame";
 import { useDebouncedValue } from "./use-debounced-value";
 
@@ -55,15 +52,15 @@ export interface VisualEditorProps {
    * it only hears about edits.
    */
   announceInitial?: boolean;
-  previewText?: string;
+  /** Minimum pane height in px (used when `height` isn't set). */
   minHeight?: number;
+  /** CSS height of the editing / preview panes. */
+  height?: string;
   onChange?: (html: string) => void;
   onDesignChange?: (design: string) => void;
   /** The user confirmed leaving the visual editor; receives the generated HTML. */
   onSwitchToHtml: (html: string) => void;
 }
-
-const SAMPLE_NAME = [SAMPLE_CONTACT.firstName, SAMPLE_CONTACT.lastName].filter(Boolean).join(" ");
 
 /** Short description of a block for the block list. */
 function summarize(block: Block): string {
@@ -109,8 +106,8 @@ export function VisualEditor({
   designName,
   initialDesign,
   announceInitial = false,
-  previewText,
   minHeight = 480,
+  height,
   onChange,
   onDesignChange,
   onSwitchToHtml,
@@ -133,12 +130,9 @@ export function VisualEditor({
   const html = useMemo(() => renderDesign(design), [design]);
   const json = useMemo(() => serializeDesign(design), [design]);
 
-  // Preview and checks trail editing slightly so the iframe doesn't reload on every key.
+  // The preview trails editing slightly so the iframe doesn't reload on every key.
   const settled = useDebouncedValue(design, 250);
-  const settledHtml = useMemo(() => renderDesign(settled), [settled]);
   const srcDoc = useMemo(() => buildPreviewDocument(renderDesign(settled, { placeholders: true })), [settled]);
-  const issues = useMemo(() => lintEmailHtml(settledHtml), [settledHtml]);
-  const size = useMemo(() => htmlByteSize(settledHtml), [settledHtml]);
 
   // Tell the parent about edits (and about the starting content of a blank start).
   const reported = useRef<{ html: string; json: string } | null>(null);
@@ -238,7 +232,7 @@ export function VisualEditor({
     setDrag(null);
   }
 
-  const paneHeight = `clamp(${minHeight}px, calc(100vh - 13rem), 56rem)`;
+  const paneHeight = height ?? `clamp(${minHeight}px, calc(100vh - 13rem), 56rem)`;
 
   return (
     <ImageLibraryProvider>
@@ -253,39 +247,19 @@ export function VisualEditor({
           }
         }}
       >
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
-          <Segmented label="Editor mode">
-            <SegmentButton pressed onClick={() => undefined}>
-              Visual
-            </SegmentButton>
-            <SegmentButton pressed={false} onClick={() => setConfirmingHtml(true)}>
-              HTML
-            </SegmentButton>
-          </Segmented>
-
-          <Segmented label="View" className="lg:hidden">
-            <SegmentButton pressed={view === "edit"} onClick={() => setView("edit")}>
+        {/* Narrow screens: one pane at a time. */}
+        <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 lg:hidden">
+          <Segmented label="View" className="flex w-full">
+            <SegmentButton pressed={view === "edit"} onClick={() => setView("edit")} className="flex-1">
               Edit
             </SegmentButton>
-            <SegmentButton pressed={view === "preview"} onClick={() => setView("preview")}>
+            <SegmentButton pressed={view === "preview"} onClick={() => setView("preview")} className="flex-1">
               Preview
-            </SegmentButton>
-          </Segmented>
-
-          <Segmented label="Preview width" className={cn("ml-auto", view === "edit" && "max-lg:hidden")}>
-            <SegmentButton pressed={width === "desktop"} onClick={() => setWidth("desktop")}>
-              <DesktopIcon />
-              Desktop
-            </SegmentButton>
-            <SegmentButton pressed={width === "mobile"} onClick={() => setWidth("mobile")}>
-              <MobileIcon />
-              Mobile
             </SegmentButton>
           </Segmented>
         </div>
 
-        <div className="grid lg:grid-cols-[20rem_minmax(0,1fr)] xl:grid-cols-[23rem_minmax(0,1fr)]">
+        <div className="grid lg:grid-cols-[22rem_minmax(0,1fr)] xl:grid-cols-[26rem_minmax(0,1fr)]">
           {/* Blocks + settings */}
           <div
             className={cn("flex min-w-0 flex-col bg-slate-50/60", view !== "edit" && "max-lg:hidden")}
@@ -304,11 +278,22 @@ export function VisualEditor({
 
             <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
               {tab === "styles" ? (
-                <StylesFields
-                  idPrefix={`${uid}-styles`}
-                  styles={design.styles}
-                  onChange={(patch) => dispatch({ type: "styles", patch })}
-                />
+                <>
+                  <StylesFields
+                    idPrefix={`${uid}-styles`}
+                    styles={design.styles}
+                    onChange={(patch) => dispatch({ type: "styles", patch })}
+                  />
+                  <div className="mt-6 border-t border-slate-200 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingHtml(true)}
+                      className="rounded text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600"
+                    >
+                      Edit as HTML code
+                    </button>
+                  </div>
+                </>
               ) : (
                 <>
                   <div>
@@ -352,11 +337,6 @@ export function VisualEditor({
                             </button>
                           ))}
                         </div>
-                        <p className="mt-2 text-xs text-slate-500">
-                          {selectedId && design.blocks.find((b) => b.id === selectedId)?.type !== "footer"
-                            ? "Added below the selected block."
-                            : "Added at the end, above the footer."}
-                        </p>
                       </div>
                     ) : null}
                   </div>
@@ -474,21 +454,11 @@ export function VisualEditor({
                   </ol>
                   {design.blocks.every((block) => block.type === "footer") ? (
                     <p className="mt-3 text-xs text-slate-500">
-                      This email only has its footer so far. Use <span className="font-medium">Add block</span> to
-                      start building it.
+                      Use <span className="font-medium">Add block</span> to start.
                     </p>
                   ) : null}
                 </>
               )}
-            </div>
-
-            <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500">
-              <p>
-                {design.blocks.length} {design.blocks.length === 1 ? "block" : "blocks"}
-              </p>
-              <span className="shrink-0 tabular-nums" title="Size of the generated HTML">
-                {formatByteSize(size)}
-              </span>
             </div>
           </div>
 
@@ -501,16 +471,18 @@ export function VisualEditor({
             )}
             style={{ height: paneHeight }}
           >
-            <div className="space-y-0.5 border-b border-slate-200 bg-white px-4 py-2 text-xs text-slate-500">
-              <p className="truncate">
-                Previewing as <span className="font-medium text-slate-700">{SAMPLE_NAME}</span> &lt;
-                {SAMPLE_CONTACT.email}&gt;
-              </p>
-              {previewText ? (
-                <p className="truncate">
-                  Preview text: <span className="text-slate-700">{previewText}</span>
-                </p>
-              ) : null}
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2">
+              <h3 className="text-xs font-medium text-slate-500">Preview</h3>
+              <Segmented label="Preview width">
+                <SegmentButton pressed={width === "desktop"} onClick={() => setWidth("desktop")}>
+                  <DesktopIcon />
+                  Desktop
+                </SegmentButton>
+                <SegmentButton pressed={width === "mobile"} onClick={() => setWidth("mobile")}>
+                  <MobileIcon />
+                  Mobile
+                </SegmentButton>
+              </Segmented>
             </div>
             <div className="relative flex-1">
               <PreviewFrame
@@ -523,16 +495,12 @@ export function VisualEditor({
           </section>
         </div>
 
-        <div className="border-t border-slate-200 px-4 py-3">
-          <LintList issues={issues} />
-        </div>
-
         <input type="hidden" name={name} value={html} />
         <input type="hidden" name={designName} value={json} />
 
         <ConfirmDialog
           open={confirmingHtml}
-          title="Switch to the HTML editor?"
+          title="Edit as HTML code?"
           confirmLabel="Switch to HTML"
           onCancel={() => setConfirmingHtml(false)}
           onConfirm={() => {
@@ -540,13 +508,10 @@ export function VisualEditor({
             onSwitchToHtml(html);
           }}
         >
+          <p>The email stays the same, but from now on it is edited as code.</p>
           <p>
-            You&apos;ll get the HTML generated from this design to edit by hand. Nothing about how the email looks
-            changes.
-          </p>
-          <p>
-            <span className="font-medium text-slate-900">This can&apos;t be undone:</span> hand-edited HTML can&apos;t
-            be turned back into blocks, so this email will no longer open in the visual editor.
+            <span className="font-medium text-slate-900">This can&apos;t be undone</span> - you won&apos;t be able
+            to go back to blocks.
           </p>
         </ConfirmDialog>
       </div>

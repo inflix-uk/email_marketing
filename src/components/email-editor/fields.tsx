@@ -3,6 +3,7 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ALIGNMENTS, normalizeHexColor, sanitizeLinkUrl, type Align } from "@/lib/email-design";
 import { cn } from "@/lib/utils";
+import { Select } from "@/components/ui/select";
 import { applyEditToElement } from "./apply-edit";
 import { Segmented, SegmentButton } from "./controls";
 import { InsertVariableMenu } from "./insert-variable-menu";
@@ -149,7 +150,7 @@ export function UrlField({
       htmlFor={id}
       hint={hint}
       warning={
-        unusable ? "Links must start with https://, http:// or mailto: - this one will be left out." : undefined
+        unusable ? "Use a full link starting with https://" : undefined
       }
     >
       <input
@@ -222,17 +223,7 @@ export function RichTextField({
   }
 
   return (
-    <FieldRow
-      label={label}
-      htmlFor={id}
-      hint={
-        <>
-          <code className="font-mono">**bold**</code>, <code className="font-mono">*italic*</code>,{" "}
-          <code className="font-mono">[link text](https://example.com)</code>. Leave a blank line to start a new
-          paragraph.
-        </>
-      }
-    >
+    <FieldRow label={label} htmlFor={id}>
       <div className="rounded-md bg-white shadow-sm ring-1 ring-slate-300 ring-inset focus-within:ring-2 focus-within:ring-indigo-600">
         <div
           role="toolbar"
@@ -406,13 +397,13 @@ export function SelectField<T extends string>({
 }) {
   return (
     <FieldRow label={label} htmlFor={id}>
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value as T)} className={cn(control, "pr-8")}>
+      <Select id={id} value={value} onChange={(e) => onChange(e.target.value as T)}>
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
         ))}
-      </select>
+      </Select>
     </FieldRow>
   );
 }

@@ -6,10 +6,6 @@ import { Alert, Field, Textarea } from "@/components/ui/form";
 import { formatNumber } from "@/lib/utils";
 import type { AddEmailsState } from "../actions";
 
-function plural(n: number, one: string, many: string) {
-  return `${formatNumber(n)} ${n === 1 ? one : many}`;
-}
-
 /** Paste addresses to add them to the list; unknown addresses become new contacts. */
 export function AddEmailsForm({ action }: { action: (state: AddEmailsState, formData: FormData) => Promise<AddEmailsState> }) {
   const [state, formAction] = useActionState(action, {});
@@ -20,39 +16,28 @@ export function AddEmailsForm({ action }: { action: (state: AddEmailsState, form
       {state.error ? <Alert tone="error">{state.error}</Alert> : null}
       {result ? (
         <Alert tone="success">
-          <p>
-            Added {plural(result.added, "contact", "contacts")} to this list
-            {result.created > 0 ? ` (${plural(result.created, "new contact", "new contacts")} created)` : ""}.
-            {result.alreadyInList > 0 ? ` ${plural(result.alreadyInList, "was", "were")} already on it.` : ""}
-          </p>
-          {result.notSubscribed > 0 ? (
-            <p className="mt-1">
-              {plural(result.notSubscribed, "contact is", "contacts are")} pending, unsubscribed or bounced and
-              won&apos;t receive campaigns.
-            </p>
-          ) : null}
+          Added {formatNumber(result.added)}
+          {result.alreadyInList > 0 ? `, ${formatNumber(result.alreadyInList)} already on the list` : ""}.
+          {result.notSubscribed > 0
+            ? ` ${formatNumber(result.notSubscribed)} of them ${result.notSubscribed === 1 ? "isn't" : "aren't"} subscribed, so won't get emails.`
+            : ""}
         </Alert>
       ) : null}
       {state.invalidCount ? (
         <Alert tone="warning">
-          Skipped {plural(state.invalidCount, "entry that isn't", "entries that aren't")} a valid email address:{" "}
-          <span className="break-all font-mono text-xs">{state.invalid?.join(", ")}</span>
+          Skipped {formatNumber(state.invalidCount)} that {state.invalidCount === 1 ? "isn't an email address" : "aren't email addresses"}:{" "}
+          <span className="break-all">{state.invalid?.join(", ")}</span>
           {state.invalidCount > (state.invalid?.length ?? 0) ? " ..." : ""}
         </Alert>
       ) : null}
-      <Field
-        label="Email addresses"
-        htmlFor="add-emails"
-        hint="One per line, or separated by commas. New addresses are added as subscribed contacts."
-      >
+      <Field label="Email addresses" htmlFor="add-emails" hint="One per line, or separated by commas.">
         <Textarea
           id="add-emails"
           name="emails"
-          rows={5}
+          rows={4}
           required
           defaultValue={state.text ?? ""}
           placeholder={"jane@example.com\nbob@example.com"}
-          className="font-mono text-xs"
         />
       </Field>
       <SubmitButton pendingText="Adding...">Add to list</SubmitButton>

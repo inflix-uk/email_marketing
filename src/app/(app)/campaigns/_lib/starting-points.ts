@@ -30,6 +30,9 @@ export const BLANK_HTML = `<!DOCTYPE html>
 
 export type StartingPointValue = "blank" | `starter:${string}` | `template:${string}`;
 
+/** Keep the campaign's own content as it is (no template behind it any more). */
+export const CURRENT_DESIGN = "current";
+
 export function starterValue(key: string): StartingPointValue {
   return `starter:${key}`;
 }

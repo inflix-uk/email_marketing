@@ -9,6 +9,8 @@ import { parseTestRecipients, testSender } from "@/lib/templates/recipients";
 export interface SendTestState {
   ok?: boolean;
   message?: string;
+  /** The message is a caveat (nothing actually went out), not a success. */
+  warning?: boolean;
   error?: string;
 }
 
@@ -23,8 +25,9 @@ const sendTestSchema = z.object({
   }),
   name: z.string().trim(),
   subject: z.string().trim(),
+  /** The template's stored preview text (no longer editable on the form). */
   previewText: z.string().trim(),
-  html: z.string().refine((value) => value.trim().length > 0, "Add some HTML before sending a test."),
+  html: z.string().refine((value) => value.trim().length > 0, "Add some content before sending a test."),
 });
 
 function text(formData: FormData, key: string): string {
@@ -43,13 +46,13 @@ export async function sendTemplateTest(_prev: SendTestState, formData: FormData)
     html: text(formData, "html"),
   });
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Check the form and try again." };
+    return { error: parsed.error.issues[0]?.message ?? "Check the address and try again." };
   }
 
   const settings = await getSettings();
   const sender = testSender(settings);
   if (!sender.email) {
-    return { error: "Set a default sender email on the Settings page (/settings) before sending a test." };
+    return { error: "Add a sender email in Settings first." };
   }
 
   const { to, name, subject, previewText, html } = parsed.data;
@@ -69,6 +72,8 @@ export async function sendTemplateTest(_prev: SendTestState, formData: FormData)
     return { error: err instanceof Error ? err.message : "The test email couldn't be sent." };
   }
 
-  const where = isDevMailer(settings) ? " Dev mail mode is on, so it was saved to data/outbox/." : "";
-  return { ok: true, message: `Test email sent to ${to.join(", ")}.${where}` };
+  if (isDevMailer(settings)) {
+    return { ok: true, warning: true, message: "Not sent - email sending isn't set up yet." };
+  }
+  return { ok: true, message: `Sent to ${to.join(", ")}.` };
 }

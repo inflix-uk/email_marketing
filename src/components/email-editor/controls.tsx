@@ -56,12 +56,6 @@ export function IconButton({
   );
 }
 
-export function Kbd({ children }: { children: ReactNode }) {
-  return (
-    <kbd className="rounded border border-slate-300 bg-white px-1 font-sans text-[11px] text-slate-600">{children}</kbd>
-  );
-}
-
 /** Modal yes/no question. Safe inside a host <form>: its buttons never submit. */
 export function ConfirmDialog({
   open,

@@ -4,27 +4,18 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireSession } from "@/lib/auth";
-import { BulkError, MAX_BULK_IDS, runBulkAction, type BulkAction, type BulkResult } from "@/lib/contacts/bulk";
+import { BulkError, MAX_BULK_IDS, runBulkAction, type BulkResult } from "@/lib/contacts/bulk";
 import { cleanContactFilters } from "@/lib/contacts/filters";
 import {
   createContact,
   deleteContact,
   resubscribeContact,
-  suppressEmails,
   unsubscribeContact,
   updateContact,
   type SaveContactResult,
-  type SuppressResult,
 } from "@/lib/contacts/mutations";
-import { getList } from "@/lib/contacts/queries";
-import {
-  contactFormValues,
-  contactInputSchema,
-  firstErrors,
-  parseEmailList,
-  tagSchema,
-  type ContactFieldErrors,
-} from "@/lib/contacts/validation";
+import { getContact, getList } from "@/lib/contacts/queries";
+import { contactFormValues, contactInputSchema, firstErrors, type ContactFieldErrors } from "@/lib/contacts/validation";
 
 export interface ContactFormState {
   ok?: boolean;
@@ -76,7 +67,11 @@ export async function updateContactAction(
     return { error: "Please fix the highlighted fields.", fieldErrors: firstErrors(parsed.error) };
   }
 
-  const result = await updateContact(id, parsed.data);
+  // The form only edits email, names and lists. Tags and extra fields are no
+  // longer on it, so keep whatever the contact already has instead of wiping them.
+  const current = await getContact(id);
+  if (!current) return failure({ ok: false, notFound: true });
+  const result = await updateContact(id, { ...parsed.data, fields: current.fields ?? {}, tags: current.tags ?? [] });
   if (!result.ok) return failure(result);
 
   revalidateContacts(id);
@@ -92,10 +87,13 @@ export async function unsubscribeContactAction(id: string): Promise<Subscription
   await requireSession();
   const changed = await unsubscribeContact(id);
   revalidateContacts(id);
-  return changed ? { message: "Contact unsubscribed. They won't receive any more campaigns." } : { error: "This contact is not subscribed." };
+  return changed ? { message: "Unsubscribed." } : { error: "This contact is not subscribed." };
 }
 
-/** Re-subscribe, or confirm a pending contact - both need the consent checkbox. */
+/**
+ * Re-subscribe, or confirm a pending contact. Needs `consent=on`, which the
+ * page only sends from the "Yes, subscribe" confirmation step.
+ */
 export async function resubscribeContactAction(
   id: string,
   _prev: SubscriptionState,
@@ -108,7 +106,7 @@ export async function resubscribeContactAction(
   const previous = await resubscribeContact(id);
   revalidateContacts(id);
   if (!previous) return { error: "This contact is already subscribed." };
-  return { message: previous === "pending" ? "Subscription confirmed." : "Contact re-subscribed." };
+  return { message: "Subscribed." };
 }
 
 export async function deleteContactAction(id: string): Promise<void> {
@@ -126,28 +124,26 @@ const bulkSchema = z.object({
       ids: z
         .array(z.string().min(1))
         .min(1, "Select at least one contact.")
-        .max(MAX_BULK_IDS, `Select at most ${MAX_BULK_IDS} contacts at a time, or use "Select all matching".`),
+        .max(MAX_BULK_IDS, `Select at most ${MAX_BULK_IDS} contacts at a time.`),
     }),
+    // The contacts page only filters by search and list.
     z.object({
       filters: z.object({
         q: z.string().optional(),
-        status: z.string().optional(),
         listId: z.string().optional(),
-        tag: z.string().optional(),
       }),
     }),
   ]),
   action: z.discriminatedUnion("type", [
     z.object({ type: z.literal("add_to_list"), listId: z.string().min(1, "Choose a list.") }),
     z.object({ type: z.literal("remove_from_list"), listId: z.string().min(1, "Choose a list.") }),
-    z.object({ type: z.literal("add_tag"), tag: tagSchema }),
-    z.object({ type: z.literal("remove_tag"), tag: tagSchema }),
     z.object({ type: z.literal("unsubscribe") }),
     z.object({ type: z.literal("delete") }),
   ]),
 });
 
 export type BulkActionInput = z.input<typeof bulkSchema>;
+type ContactBulkAction = z.output<typeof bulkSchema>["action"];
 
 export interface BulkState {
   error?: string;
@@ -158,7 +154,7 @@ function people(n: number): string {
   return `${n.toLocaleString("en-GB")} ${n === 1 ? "contact" : "contacts"}`;
 }
 
-async function bulkMessage(action: BulkAction, { matched, changed }: BulkResult): Promise<string> {
+async function bulkMessage(action: ContactBulkAction, { matched, changed }: BulkResult): Promise<string> {
   const rest = matched - changed;
   const others = (text: string) => (rest > 0 ? ` ${rest.toLocaleString("en-GB")} ${text}.` : "");
   switch (action.type) {
@@ -170,10 +166,6 @@ async function bulkMessage(action: BulkAction, { matched, changed }: BulkResult)
       const name = (await getList(action.listId))?.name ?? "the list";
       return `Removed ${people(changed)} from ${name}.${others(rest === 1 ? "wasn't on it" : "weren't on it")}`;
     }
-    case "add_tag":
-      return `Tagged ${people(changed)} with "${action.tag}".${others("already had it")}`;
-    case "remove_tag":
-      return `Removed the tag "${action.tag}" from ${people(changed)}.${others("didn't have it")}`;
     case "unsubscribe":
       return `Unsubscribed ${people(changed)}.${others(rest === 1 ? "wasn't subscribed" : "weren't subscribed")}`;
     case "delete":
@@ -204,47 +196,4 @@ export async function bulkContactsAction(input: BulkActionInput): Promise<BulkSt
     revalidatePath("/contacts", "layout");
     revalidatePath("/lists", "layout");
   }
-}
-
-// --- Suppression list ---------------------------------------------------------------
-
-/** Paste-to-suppress is for quick lists; it shares the limit of "paste emails into a list". */
-const MAX_SUPPRESSED_EMAILS = 5000;
-
-export interface SuppressState {
-  error?: string;
-  result?: SuppressResult;
-  /** Entries that weren't valid addresses (first few). */
-  invalid?: string[];
-  invalidCount?: number;
-  /** Echoed back on errors so the textarea keeps its content. */
-  text?: string;
-}
-
-export async function suppressEmailsAction(_prev: SuppressState, formData: FormData): Promise<SuppressState> {
-  await requireSession();
-  const text = String(formData.get("emails") ?? "");
-  const { emails, invalid } = parseEmailList(text);
-
-  if (emails.length === 0) {
-    return {
-      error: invalid.length
-        ? "None of those look like email addresses. Put one address per line, or separate them with commas."
-        : "Paste at least one email address.",
-      invalid: invalid.slice(0, 20),
-      invalidCount: invalid.length,
-      text,
-    };
-  }
-  if (emails.length > MAX_SUPPRESSED_EMAILS) {
-    return {
-      error: `That's ${emails.length.toLocaleString("en-GB")} addresses - paste at most ${MAX_SUPPRESSED_EMAILS.toLocaleString("en-GB")} at a time.`,
-      text,
-    };
-  }
-
-  const result = await suppressEmails(emails);
-  revalidatePath("/contacts", "layout");
-  revalidatePath("/lists", "layout");
-  return { result, invalid: invalid.slice(0, 20), invalidCount: invalid.length };
 }

@@ -23,7 +23,7 @@ export function FilterTabs({
   className?: string;
 }) {
   return (
-    <nav aria-label={label} className={cn("flex gap-1 overflow-x-auto border-b border-slate-200", className)}>
+    <nav aria-label={label} className={cn("flex gap-1 overflow-x-auto overflow-y-hidden border-b border-slate-200", className)}>
       {tabs.map((tab) => (
         <Link
           key={tab.label}

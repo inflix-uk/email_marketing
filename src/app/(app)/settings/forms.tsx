@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { saveAccount, saveEmailSending, saveSender, type SettingsFormState } from "./actions";
 import { detectProvider, PROVIDERS } from "./providers";
+import { PasswordInput } from "@/components/ui/password-input";
 
 type Action = (prev: SettingsFormState, formData: FormData) => Promise<SettingsFormState>;
 
@@ -170,10 +171,9 @@ function SmtpFields({ initial, errors }: { initial: SmtpFormValues; errors: Reco
         <Input id="smtp-user" name="user" defaultValue={initial.user} autoComplete="off" spellCheck={false} />
       </Field>
       <Field label="Password" htmlFor="smtp-pass" error={errors.pass}>
-        <Input
+        <PasswordInput
           id="smtp-pass"
           name="pass"
-          type="password"
           autoComplete="new-password"
           placeholder={initial.hasPassword ? "Saved (leave blank to keep)" : ""}
         />
@@ -269,19 +269,18 @@ export function AccountForm({ email }: { email: string }) {
           <Input id="account-email" name="email" type="email" autoComplete="username" defaultValue={email} required />
         </Field>
         <Field label="Current password" htmlFor="account-current-password" error={errors.currentPassword}>
-          <Input
+          <PasswordInput
             id="account-current-password"
             name="currentPassword"
-            type="password"
             autoComplete="current-password"
             required
           />
         </Field>
         <Field label="New password" htmlFor="account-new-password" error={errors.newPassword} hint="Leave blank to keep it.">
-          <Input id="account-new-password" name="newPassword" type="password" autoComplete="new-password" />
+          <PasswordInput id="account-new-password" name="newPassword" autoComplete="new-password" />
         </Field>
         <Field label="Confirm new password" htmlFor="account-confirm" error={errors.confirm}>
-          <Input id="account-confirm" name="confirm" type="password" autoComplete="new-password" />
+          <PasswordInput id="account-confirm" name="confirm" autoComplete="new-password" />
         </Field>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">

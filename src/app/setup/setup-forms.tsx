@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { SubmitButton } from "@/components/ui/button";
 import { Alert, Field, Input } from "@/components/ui/form";
 import { connectDatabase, createAdmin, type SetupFormState } from "./actions";
+import { PasswordInput } from "@/components/ui/password-input";
 
 export function ConnectForm({ initialError }: { initialError?: string }) {
   const [state, action] = useActionState<SetupFormState, FormData>(connectDatabase, {
@@ -49,10 +50,10 @@ export function AccountForm() {
         <Input id="email" name="email" type="email" autoComplete="email" required autoFocus />
       </Field>
       <Field label="Password" htmlFor="password" error={state.fieldErrors?.password}>
-        <Input id="password" name="password" type="password" autoComplete="new-password" required />
+        <PasswordInput id="password" name="password" autoComplete="new-password" required />
       </Field>
       <Field label="Confirm password" htmlFor="confirm" error={state.fieldErrors?.confirm}>
-        <Input id="confirm" name="confirm" type="password" autoComplete="new-password" required />
+        <PasswordInput id="confirm" name="confirm" autoComplete="new-password" required />
       </Field>
       <SubmitButton className="w-full" pendingText="Creating account...">
         Create account

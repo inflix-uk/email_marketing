@@ -2,8 +2,9 @@
 
 import { useActionState } from "react";
 import { ButtonLink, SubmitButton } from "@/components/ui/button";
-import { Alert, Field, Input } from "@/components/ui/form";
+import { Alert, Field } from "@/components/ui/form";
 import { setNewPassword, type ResetPasswordState } from "./actions";
+import { PasswordInput } from "@/components/ui/password-input";
 
 /** Shown instead of the form when the link is missing, used or expired. */
 export function LinkExpired() {
@@ -44,10 +45,9 @@ export function ResetPasswordForm({
         error={state.fieldErrors?.password}
         hint={`At least ${minLength} characters.`}
       >
-        <Input
+        <PasswordInput
           id="password"
           name="password"
-          type="password"
           autoComplete="new-password"
           minLength={minLength}
           maxLength={maxLength}
@@ -56,7 +56,7 @@ export function ResetPasswordForm({
         />
       </Field>
       <Field label="Type it again" htmlFor="confirm" error={state.fieldErrors?.confirm}>
-        <Input id="confirm" name="confirm" type="password" autoComplete="new-password" required />
+        <PasswordInput id="confirm" name="confirm" autoComplete="new-password" required />
       </Field>
       <SubmitButton className="w-full" pendingText="Saving...">
         Save password and sign in

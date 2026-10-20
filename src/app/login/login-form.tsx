@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import { SubmitButton } from "@/components/ui/button";
 import { Alert, Field, Input, Label } from "@/components/ui/form";
 import { login, type LoginState } from "./actions";
+import { PasswordInput } from "@/components/ui/password-input";
 
 export function LoginForm({ next }: { next: string }) {
   const [state, action] = useActionState<LoginState, FormData>(login, {});
@@ -33,7 +34,7 @@ export function LoginForm({ next }: { next: string }) {
             Forgot password?
           </Link>
         </div>
-        <Input id="password" name="password" type="password" autoComplete="current-password" required />
+        <PasswordInput id="password" name="password" autoComplete="current-password" required />
       </div>
       <SubmitButton className="w-full" pendingText="Signing in...">
         Sign in

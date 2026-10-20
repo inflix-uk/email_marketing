@@ -8,7 +8,7 @@ import { Badge, StatusBadge, Table, TBody, Td, Th } from "@/components/ui/layout
 import type { ContactStatus } from "@/db/schema";
 import type { ContactFilters } from "@/lib/contacts/filters";
 import type { ListRef } from "@/lib/contacts/queries";
-import { formatDate, formatNumber } from "@/lib/utils";
+import { cn, formatDate, formatNumber } from "@/lib/utils";
 import { bulkContactsAction, type BulkActionInput, type BulkState } from "../actions";
 import { ClickableRow } from "./clickable-row";
 
@@ -30,6 +30,7 @@ const CHECKBOX = "h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-in
 const ACTION_LABELS: Record<ActionType, string> = {
   add_to_list: "Add to list",
   remove_from_list: "Remove from list",
+  subscribe: "Subscribe",
   unsubscribe: "Unsubscribe",
   delete: "Delete",
 };
@@ -103,7 +104,7 @@ export function ContactsTable({
   }
 
   const needsList = type === "add_to_list" || type === "remove_from_list";
-  const needsConfirm = type === "delete" || type === "unsubscribe";
+  const needsConfirm = type === "delete" || type === "unsubscribe" || type === "subscribe";
   const ready = count > 0 && (!needsList || Boolean(listId));
 
   function run() {
@@ -112,7 +113,9 @@ export function ContactsTable({
       : { ids: onPage.map((r) => r.id) };
     const action: BulkActionInput["action"] = needsList
       ? { type: type as "add_to_list" | "remove_from_list", listId }
-      : { type: type as "unsubscribe" | "delete" };
+      : type === "subscribe"
+        ? { type: "subscribe", consent: true }
+        : { type: type as "unsubscribe" | "delete" };
     startTransition(async () => {
       const result = await bulkContactsAction({ target, action });
       setState(result);
@@ -221,15 +224,22 @@ export function ContactsTable({
           </div>
 
           {confirming ? (
-            <div className="flex flex-col gap-3 rounded-md bg-red-50 p-3 ring-1 ring-inset ring-red-200 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-red-800">
+            <div
+              className={cn(
+                "flex flex-col gap-3 rounded-md p-3 ring-1 ring-inset sm:flex-row sm:items-center sm:justify-between",
+                type === "subscribe" ? "bg-amber-50 ring-amber-200" : "bg-red-50 ring-red-200",
+              )}
+            >
+              <p className={cn("text-sm", type === "subscribe" ? "text-amber-900" : "text-red-800")}>
                 {type === "delete"
                   ? `Delete ${people(count)}? This can't be undone.`
-                  : `Unsubscribe ${people(count)}? They won't get any more emails.`}
+                  : type === "subscribe"
+                    ? `Subscribe ${people(count)}? Only do this if they agreed to get your emails.`
+                    : `Unsubscribe ${people(count)}? They won't get any more emails.`}
               </p>
               <div className="flex shrink-0 gap-2">
-                <Button type="button" variant="danger" size="sm" onClick={run} disabled={pending} autoFocus>
-                  {pending ? "Working..." : type === "delete" ? "Yes, delete" : "Yes, unsubscribe"}
+                <Button type="button" variant={type === "subscribe" ? "primary" : "danger"} size="sm" onClick={run} disabled={pending} autoFocus>
+                  {pending ? "Working..." : type === "delete" ? "Yes, delete" : type === "subscribe" ? "Yes, they agreed" : "Yes, unsubscribe"}
                 </Button>
                 <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(false)} disabled={pending}>
                   Cancel

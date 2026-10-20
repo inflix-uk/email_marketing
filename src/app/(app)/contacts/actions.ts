@@ -137,6 +137,8 @@ const bulkSchema = z.object({
   action: z.discriminatedUnion("type", [
     z.object({ type: z.literal("add_to_list"), listId: z.string().min(1, "Choose a list.") }),
     z.object({ type: z.literal("remove_from_list"), listId: z.string().min(1, "Choose a list.") }),
+    // The page only sends this from the "only people who agreed" confirmation step.
+    z.object({ type: z.literal("subscribe"), consent: z.literal(true, "Confirm these people agreed to get your emails.") }),
     z.object({ type: z.literal("unsubscribe") }),
     z.object({ type: z.literal("delete") }),
   ]),
@@ -166,6 +168,8 @@ async function bulkMessage(action: ContactBulkAction, { matched, changed }: Bulk
       const name = (await getList(action.listId))?.name ?? "the list";
       return `Removed ${people(changed)} from ${name}.${others(rest === 1 ? "wasn't on it" : "weren't on it")}`;
     }
+    case "subscribe":
+      return `Subscribed ${people(changed)}.${others(rest === 1 ? "was already subscribed or can't get email (bounced)" : "were already subscribed or can't get email (bounced)")}`;
     case "unsubscribe":
       return `Unsubscribed ${people(changed)}.${others(rest === 1 ? "wasn't subscribed" : "weren't subscribed")}`;
     case "delete":
@@ -175,7 +179,7 @@ async function bulkMessage(action: ContactBulkAction, { matched, changed }: Bulk
 
 /**
  * Apply one action to the ticked contacts (`ids`) or to everyone matching the
- * current filter (`filters`). Never re-subscribes anyone and never triggers
+ * current filter (`filters`). Only re-subscribes on the explicit, confirmed "subscribe" action; never triggers
  * automations.
  */
 export async function bulkContactsAction(input: BulkActionInput): Promise<BulkState> {

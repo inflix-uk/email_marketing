@@ -67,7 +67,7 @@ describe("bulkUpdatePlan", () => {
     });
   });
 
-  test("no bulk action can ever set a contact to subscribed", () => {
+  test("only the explicit subscribe action sets a contact to subscribed", () => {
     const actions = [
       { type: "add_to_list", listId: "L1" },
       { type: "remove_from_list", listId: "L1" },
@@ -77,10 +77,20 @@ describe("bulkUpdatePlan", () => {
     ] as const;
     for (const action of actions) {
       const { update } = bulkUpdatePlan(action, now);
-      const status = (update.$set as { status?: string } | undefined)?.status;
+      const status = ((update as { $set?: { status?: string } }).$set)?.status;
       assert.notEqual(status, "subscribed", action.type);
       if (action.type !== "unsubscribe") assert.equal(status, undefined, action.type);
     }
+  });
+});
+
+describe("bulk subscribe", () => {
+  test("re-subscribes only unsubscribed or pending contacts, never bounced or complained", () => {
+    const { only, update } = bulkUpdatePlan({ type: "subscribe" }, now);
+    assert.deepEqual(only, { status: { $in: ["unsubscribed", "pending"] } });
+    const set = (update as { $set: Record<string, unknown> }[])[0].$set;
+    assert.equal(set.status, "subscribed");
+    assert.equal(set.unsubscribedAt, null);
   });
 });
 

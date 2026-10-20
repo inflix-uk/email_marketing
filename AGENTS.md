@@ -46,7 +46,7 @@ Stack: Next.js 16 App Router + React 19 + Tailwind v4, MongoDB (official `mongod
 - Server Components by default; `"use client"` only for interactivity.
 - Mutations are Server Actions in an `actions.ts` next to the page: `await requireSession()` first, validate with zod, then `revalidatePath(...)`. Return state objects for `useActionState` forms.
 - Emails are stored lower-cased: `normalizeEmail` / `isValidEmail` from `@/lib/utils`.
-- Never re-subscribe a contact whose status is `unsubscribed`/`bounced`/`complained` as a side effect (imports, list adds). Only an explicit manual edit may do that.
+- Never re-subscribe a contact whose status is `unsubscribed`/`bounced`/`complained` as a side effect (imports, list adds). Only an explicit manual edit may do that. The confirmed bulk "Subscribe" on /contacts counts as explicit, and only re-subscribes `unsubscribed`/`pending` (never bounced/complained).
 - Code under `src/lib/**` and `src/db/**` also runs in the worker via tsx: don't import `server-only` or `next/*` there (except `lib/auth.ts`, `lib/setup.ts`). Scripts run as CommonJS: no top-level `await`.
 
 ## Keep the UI simple (owner's request)

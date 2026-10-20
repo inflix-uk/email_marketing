@@ -1,4 +1,4 @@
-import type { Filter, UpdateFilter } from "mongodb";
+import type { Document, Filter, UpdateFilter } from "mongodb";
 import { collections } from "@/db";
 import type { ContactDoc } from "@/db/schema";
 import { contactFilter, type ContactFilters } from "./filters";
@@ -15,7 +15,7 @@ const DELETE_BATCH = 500;
 
 export type BulkTarget = { ids: string[] } | { filters: ContactFilters };
 
-export const BULK_ACTION_TYPES = ["add_to_list", "remove_from_list", "add_tag", "remove_tag", "unsubscribe", "delete"] as const;
+export const BULK_ACTION_TYPES = ["add_to_list", "remove_from_list", "add_tag", "remove_tag", "subscribe", "unsubscribe", "delete"] as const;
 export type BulkActionType = (typeof BULK_ACTION_TYPES)[number];
 
 export type BulkAction =
@@ -23,6 +23,8 @@ export type BulkAction =
   | { type: "remove_from_list"; listId: string }
   | { type: "add_tag"; tag: string }
   | { type: "remove_tag"; tag: string }
+  /** Explicit, confirmed re-subscribe by a person (never a side effect). */
+  | { type: "subscribe" }
   | { type: "unsubscribe" }
   | { type: "delete" };
 
@@ -49,7 +51,7 @@ export function bulkTargetFilter(target: BulkTarget): Filter<ContactDoc> {
 export function bulkUpdatePlan(
   action: Exclude<BulkAction, { type: "delete" }>,
   now: Date,
-): { only: Filter<ContactDoc>; update: UpdateFilter<ContactDoc> } {
+): { only: Filter<ContactDoc>; update: UpdateFilter<ContactDoc> | Document[] } {
   switch (action.type) {
     case "add_to_list":
       return { only: { listIds: { $ne: action.listId } }, update: { $addToSet: { listIds: action.listId }, $set: { updatedAt: now } } };
@@ -59,6 +61,23 @@ export function bulkUpdatePlan(
       return { only: { tags: { $ne: action.tag } }, update: { $addToSet: { tags: action.tag }, $set: { updatedAt: now } } };
     case "remove_tag":
       return { only: { tags: action.tag }, update: { $pull: { tags: action.tag }, $set: { updatedAt: now } } };
+    case "subscribe":
+      // Unsubscribed / pending only: bounced and complained addresses stay blocked.
+      // A pipeline update, so a "suppression" source becomes "manual" like a single re-subscribe.
+      return {
+        only: { status: { $in: ["unsubscribed", "pending"] } },
+        update: [
+          {
+            $set: {
+              status: "subscribed",
+              unsubscribedAt: null,
+              updatedAt: now,
+              source: { $cond: [{ $eq: ["$source", "suppression"] }, "manual", "$source"] },
+              consent: { $literal: { source: "manual", at: now } },
+            },
+          },
+        ],
+      };
     case "unsubscribe":
       // Only ever moves people out of the mailable statuses; bounced / complained keep their status.
       return {

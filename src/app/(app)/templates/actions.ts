@@ -83,6 +83,54 @@ export async function createTemplate(formData: FormData): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Create from pasted HTML (e.g. written with ChatGPT)
+// ---------------------------------------------------------------------------
+
+export interface PasteHtmlState {
+  error?: string;
+}
+
+/** Text of the HTML's <title>, if any (used as the default name and subject). */
+function htmlTitle(html: string): string {
+  const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  return (match?.[1] ?? "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Pasted HTML becomes a template in the HTML editor; sending adds an unsubscribe footer if it has none. */
+export async function createTemplateFromHtml(_prev: PasteHtmlState, formData: FormData): Promise<PasteHtmlState> {
+  await requireSession();
+  const html = htmlSchema.safeParse(text(formData, "html"));
+  if (!html.success) return { error: html.error.issues[0]?.message ?? "Paste the email HTML first." };
+  if (!/<[a-z][\s\S]*>/i.test(html.data)) return { error: "That doesn't look like HTML. Paste the full email code." };
+
+  const title = htmlTitle(html.data).slice(0, MAX_SUBJECT);
+  const name = nameSchema.safeParse(text(formData, "name").trim() || title.slice(0, MAX_NAME) || "Pasted template");
+  if (!name.success) return { error: name.error.issues[0]?.message ?? "Check the name." };
+
+  const now = new Date();
+  const created: TemplateDoc = {
+    _id: newId(),
+    name: name.data,
+    subject: title || null,
+    previewText: null,
+    html: html.data,
+    // No design: hand-written HTML opens (and stays) in the HTML editor.
+    design: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const { templates } = await collections();
+  await templates.insertOne(created);
+
+  templatePaths();
+  redirect(`/templates/${created._id}`);
+}
+
+// ---------------------------------------------------------------------------
 // Save
 // ---------------------------------------------------------------------------
 

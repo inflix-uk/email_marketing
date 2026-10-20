@@ -15,7 +15,7 @@ export default function NewTemplatePage() {
           </Link>
         }
         title="New template"
-        description="Pick a design to start from."
+        description="Pick a design, or paste your own HTML."
       />
       <StarterPicker />
     </>

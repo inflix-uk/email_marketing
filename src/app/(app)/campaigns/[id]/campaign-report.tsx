@@ -5,7 +5,7 @@ import { Card, CardBody, CardHeader, EmptyState, PageHeader, Stat, StatusBadge, 
 import type { Campaign } from "@/db/schema";
 import { getCampaignStats, type CampaignStats } from "@/lib/sending";
 import { cn, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
-import { cancelSending, duplicateCampaign, pauseSending, resumeSending } from "../actions";
+import { cancelSending, deleteCampaign, duplicateCampaign, pauseSending, resumeSending } from "../actions";
 import { ActionButton, ConfirmButton } from "../_components/action-buttons";
 import { DownloadLink } from "../_components/download-link";
 import { FilterTabs } from "../_components/filter-tabs";
@@ -113,6 +113,17 @@ export async function CampaignReport({ campaign, filter, page }: { campaign: Cam
             <ActionButton action={duplicateCampaign.bind(null, campaign.id)} pendingText="Copying...">
               Send again
             </ActionButton>
+            {campaign.status === "sent" || campaign.status === "cancelled" ? (
+              <ConfirmButton
+                action={deleteCampaign.bind(null, campaign.id)}
+                label="Delete"
+                variant="ghost"
+                title="Delete this campaign?"
+                description={<p>Its results are deleted too. Your contacts stay as they are.</p>}
+                confirmLabel="Delete"
+                pendingText="Deleting..."
+              />
+            ) : null}
           </>
         }
       />

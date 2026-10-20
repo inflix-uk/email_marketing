@@ -451,14 +451,16 @@ export async function deleteCampaign(campaignId: string): Promise<ActionState> {
   await requireSession();
   const campaign = await findCampaign(campaignId);
   if (!campaign) return NOT_FOUND;
-  if (campaign.status !== "draft") {
-    return { error: "Only drafts can be deleted." };
+  // Drafts and finished campaigns can go; anything scheduled or sending must be stopped first.
+  const deletable: CampaignStatus[] = ["draft", "sent", "cancelled"];
+  if (!deletable.includes(campaign.status)) {
+    return { error: "Stop or unschedule this campaign before deleting it." };
   }
 
   const { campaigns, sends, clicks } = await collections();
-  const result = await campaigns.deleteOne({ _id: campaign.id, status: "draft", ...notQueueing() });
-  if (result.deletedCount === 0) return { error: "Only drafts can be deleted." };
-  // No foreign keys: remove anything left over from an interrupted queueing.
+  const result = await campaigns.deleteOne({ _id: campaign.id, status: { $in: deletable }, ...notQueueing() });
+  if (result.deletedCount === 0) return { error: "This campaign can't be deleted right now." };
+  // Its sends and clicks (the stats) go with it. Contacts, and their unsubscribes, are untouched.
   await Promise.all([sends.deleteMany({ campaignId: campaign.id }), clicks.deleteMany({ campaignId: campaign.id })]);
 
   revalidateCampaigns();

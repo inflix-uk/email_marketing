@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
-import { isWebhookProvider, parseWebhook, recordBounce, recordComplaint } from "@/lib/sending";
+import { isWebhookProvider, parseWebhook, recordBounce, recordComplaint, recordSoftBounce } from "@/lib/sending";
 import { getWebhookSecret } from "@/lib/settings";
 
 // Bounce / complaint webhooks from the email provider. Public (see
@@ -76,11 +76,16 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   let bounces = 0;
   let complaints = 0;
+  let softBounces = 0;
   try {
     for (const event of parsed.events) {
       if (event.type === "bounce") {
         await recordBounce(event);
         bounces++;
+      } else if (event.type === "soft_bounce") {
+        // Report only: the contact is untouched and the provider retries.
+        await recordSoftBounce(event);
+        softBounces++;
       } else {
         await recordComplaint(event);
         complaints++;
@@ -90,7 +95,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     console.error(`[webhooks] failed to record a ${provider} notification`, err);
     return json({ error: "Temporarily unavailable" }, 500);
   }
-  return json({ ok: true, bounces, complaints });
+  return json({ ok: true, bounces, softBounces, complaints });
 }
 
 /** Lets you check the URL in a browser: 200 when the provider and token are right. */

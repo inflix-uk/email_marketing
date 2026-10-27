@@ -84,6 +84,7 @@ async function countExisting(db: Collections) {
 async function wipe(db: Collections) {
   await Promise.all([
     db.clicks.deleteMany({}),
+    db.opens.deleteMany({}),
     db.sends.deleteMany({}),
     db.campaigns.deleteMany({}),
     db.contacts.deleteMany({}),

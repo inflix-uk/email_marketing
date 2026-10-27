@@ -154,18 +154,44 @@ export interface SendDoc {
   openedAt: Date | null;
   clickedAt: Date | null;
   unsubscribedAt: Date | null;
+  /** Every recorded open / click, including suspected bots (raw). */
   openCount: number;
   clickCount: number;
+  /** How many of openCount / clickCount were suspected bots or Apple privacy-proxy opens. Missing = 0 (older data). */
+  botOpenCount?: number;
+  botClickCount?: number;
+  /** A temporary delivery problem reported by the provider (mailbox full...). */
+  softBouncedAt?: Date | null;
+  /** Latest open/click. Missing on older data. */
+  lastActivityAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
-/** [clicks] One per tracked link click. */
+/** [clicks] One per tracked link click (suspected bots included, flagged). */
 export interface ClickDoc {
   _id: string;
   sendId: string;
   campaignId: string;
   url: string;
+  // Optional: older clicks don't have these (they were all counted as people).
+  userAgent?: string | null;
+  /** ISO country code from the hosting proxy's header, if it sent one. */
+  country?: string | null;
+  suspectedBot?: boolean;
+  createdAt: Date;
+}
+
+/** [opens] One per open-pixel hit (suspected bots included, flagged). Older campaigns have none. */
+export interface OpenDoc {
+  _id: string;
+  sendId: string;
+  campaignId: string;
+  userAgent: string | null;
+  country: string | null;
+  suspectedBot: boolean;
+  /** Apple Mail Privacy Protection loaded the images. */
+  privacyProxy: boolean;
   createdAt: Date;
 }
 

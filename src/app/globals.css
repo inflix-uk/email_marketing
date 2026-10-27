@@ -9,3 +9,19 @@ body {
   background: #f8fafc;
   color: #0f172a;
 }
+
+/* Campaign report "Print / PDF": only the report, without the app's sidebar. */
+@media print {
+  body:has([data-print-report]) aside {
+    display: none !important;
+  }
+  body:has([data-print-report]) {
+    background: #fff;
+  }
+  [data-print-report] .break-inside-avoid {
+    break-inside: avoid;
+  }
+  @page {
+    margin: 12mm;
+  }
+}

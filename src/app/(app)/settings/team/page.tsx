@@ -4,8 +4,9 @@ import { ButtonLink, SubmitButton } from "@/components/ui/button";
 import { Alert } from "@/components/ui/form";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { INVITE_LINK_DAYS, listTeam, requireSession } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { removeTeammateAction, signOutEverywhereAction } from "./actions";
-import { AddTeammateForm, TeamTable } from "./team-forms";
+import { AddTeammateForm, RoleHelp, TeamTable } from "./team-forms";
 
 export const metadata: Metadata = { title: "Team" };
 
@@ -13,6 +14,7 @@ const NOTICES: Record<string, { tone: "success" | "error"; text: string }> = {
   removed: { tone: "success", text: "Removed. They have been signed out." },
   self: { tone: "error", text: "You can't remove your own account." },
   last: { tone: "error", text: "You can't remove the last account." },
+  "last-admin": { tone: "error", text: "You can't remove the last admin." },
   gone: { tone: "error", text: "That person was already removed." },
 };
 
@@ -28,17 +30,20 @@ export default async function TeamPage({
   const session = await requireSession();
   const query = await searchParams;
   const team = await listTeam();
+  // Only admins manage the team; everyone else sees who is on it.
+  const manage = can(session.role, "team");
 
   // "Remove" is two steps: the link adds ?remove=<id>, this page then asks to confirm.
   const removeId = first(query.remove);
-  const toRemove = team.length > 1 ? team.find((m) => m.id === removeId && m.email !== session.email) : undefined;
+  const toRemove =
+    manage && team.length > 1 ? team.find((m) => m.id === removeId && m.email !== session.email) : undefined;
   const notice = toRemove ? undefined : NOTICES[first(query.notice) ?? ""];
 
   return (
     <>
       <PageHeader
         title="Team"
-        description="Everyone here can sign in and use the whole account."
+        description={manage ? "Choose what each person can do." : "Only admins can add people or change roles."}
         back={
           <Link href="/settings" className="text-slate-500 hover:text-slate-700">
             &larr; Settings
@@ -77,16 +82,23 @@ export default async function TeamPage({
                 name: m.name,
                 pending: m.pending,
                 isYou: m.email === session.email,
+                role: m.role,
               }))}
+              manage={manage}
             />
           </Card>
 
-          <Card>
-            <CardHeader title="Add someone" description="They get a link to set their own password." />
-            <CardBody>
-              <AddTeammateForm linkDays={INVITE_LINK_DAYS} />
-            </CardBody>
-          </Card>
+          {manage ? (
+            <Card>
+              <CardHeader title="Add someone" description="They get a link to set their own password." />
+              <CardBody>
+                <div className="space-y-4">
+                  <AddTeammateForm linkDays={INVITE_LINK_DAYS} />
+                  <RoleHelp />
+                </div>
+              </CardBody>
+            </Card>
+          ) : null}
         </div>
 
         <form action={signOutEverywhereAction} className="flex flex-wrap items-center gap-2 text-sm text-slate-500">

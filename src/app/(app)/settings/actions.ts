@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireSession, updateAccount } from "@/lib/auth";
+import { audit } from "@/lib/audit";
+import { requirePermission, requireSession, updateAccount } from "@/lib/auth";
 import { classifySendError, sendEmail } from "@/lib/mailer";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { escapeHtml } from "@/lib/render";
@@ -94,7 +95,7 @@ ${companyAddress ? `<p style="max-width:520px;margin:16px auto 0;font-size:12px;
  * handed to a different server).
  */
 export async function saveEmailSending(_prev: SettingsFormState, formData: FormData): Promise<SettingsFormState> {
-  await requireSession();
+  const session = await requirePermission("settings");
   const test = formData.get("intent") === "test";
 
   const parsed = smtpSchema.safeParse(fields(formData));
@@ -111,8 +112,11 @@ export async function saveEmailSending(_prev: SettingsFormState, formData: FormD
   }
   const smtp: SmtpSettings = { host: input.host, port: input.port, secure: input.secure, user: input.user, pass };
 
+  // Never the password.
+  const logged = { host: smtp.host, port: smtp.port, secure: smtp.secure, user: smtp.user };
   if (!test) {
     await updateSettings({ smtp });
+    await audit(session, "settings.email_sending", { type: "settings", id: "app", details: logged });
     return saved(smtp.host ? "Saved" : "Saved. Emails won't be sent until you add your email provider.");
   }
 
@@ -152,6 +156,7 @@ export async function saveEmailSending(_prev: SettingsFormState, formData: FormD
   }
 
   await updateSettings({ smtp });
+  await audit(session, "settings.email_sending", { type: "settings", id: "app", details: { ...logged, testedWith: to.data } });
   return saved(`Sent to ${to.data} and settings saved. Check your inbox (and spam folder).`);
 }
 
@@ -182,10 +187,11 @@ const senderSchema = z.object({
 });
 
 export async function saveSender(_prev: SettingsFormState, formData: FormData): Promise<SettingsFormState> {
-  await requireSession();
+  const session = await requirePermission("settings");
   const parsed = senderSchema.safeParse(fields(formData));
   if (!parsed.success) return invalid(parsed.error);
   await updateSettings(parsed.data); // reply-to is not on the page and stays as stored
+  await audit(session, "settings.sender", { type: "settings", id: "app", details: parsed.data });
   return saved();
 }
 
@@ -222,5 +228,10 @@ export async function saveAccount(_prev: SettingsFormState, formData: FormData):
       ? { fieldErrors: { currentPassword: [error] } }
       : { fieldErrors: { email: [error] } };
   }
+  await audit(session, "account.update", {
+    type: "user",
+    id: session.userId,
+    details: { newEmail: newEmail !== session.email ? newEmail : undefined, passwordChanged: Boolean(newPassword) },
+  });
   return saved("Account updated");
 }

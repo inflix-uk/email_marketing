@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireSession } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { addEmailsToList, createList, deleteList, removeListMember, updateList, type AddEmailsResult } from "@/lib/contacts/mutations";
 import { getList } from "@/lib/contacts/queries";
 import { listInputSchema, parseEmailList } from "@/lib/contacts/validation";
@@ -31,7 +31,7 @@ function parseName(formData: FormData) {
 }
 
 export async function createListAction(_prev: ListFormState, formData: FormData): Promise<ListFormState> {
-  await requireSession();
+  await requirePermission("edit");
   const input = parseName(formData);
   if (!input.ok) return input.state;
 
@@ -42,7 +42,7 @@ export async function createListAction(_prev: ListFormState, formData: FormData)
 
 /** Rename a list. Its stored description (no longer editable) is kept as it is. */
 export async function updateListAction(id: string, _prev: ListFormState, formData: FormData): Promise<ListFormState> {
-  await requireSession();
+  await requirePermission("edit");
   const input = parseName(formData);
   if (!input.ok) return input.state;
 
@@ -55,14 +55,14 @@ export async function updateListAction(id: string, _prev: ListFormState, formDat
 }
 
 export async function deleteListAction(id: string): Promise<void> {
-  await requireSession();
+  await requirePermission("delete");
   await deleteList(id);
   revalidateLists();
   redirect("/lists");
 }
 
 export async function removeMemberAction(listId: string, contactId: string): Promise<void> {
-  await requireSession();
+  await requirePermission("edit");
   await removeListMember(listId, contactId);
   revalidateLists(listId);
 }
@@ -81,7 +81,7 @@ export interface AddEmailsState {
 }
 
 export async function addEmailsAction(listId: string, _prev: AddEmailsState, formData: FormData): Promise<AddEmailsState> {
-  await requireSession();
+  await requirePermission("edit");
   const text = String(formData.get("emails") ?? "");
   const { emails, invalid } = parseEmailList(text);
 

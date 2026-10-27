@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { requireSession } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { sendTestEmail } from "@/lib/sending";
 import { getSettings, isDevMailer } from "@/lib/settings";
 import { parseTestRecipients, testSender } from "@/lib/templates/recipients";
@@ -37,7 +37,7 @@ function text(formData: FormData, key: string): string {
 
 /** Sends the editor's current (possibly unsaved) content to up to 5 addresses. */
 export async function sendTemplateTest(_prev: SendTestState, formData: FormData): Promise<SendTestState> {
-  await requireSession();
+  await requirePermission("send");
   const parsed = sendTestSchema.safeParse({
     to: text(formData, "to"),
     name: text(formData, "name"),

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { getSession } from "@/lib/auth";
+import { audit } from "@/lib/audit";
+import { authorizeRequest } from "@/lib/auth";
 import { csvHeader, csvRows, exportFileName, sortFieldKeys, type ExportContact } from "@/lib/contacts/csv";
 import { parseContactFilters } from "@/lib/contacts/filters";
 import { exportContactsCursor, exportFieldKeys, getList } from "@/lib/contacts/queries";
@@ -14,9 +15,9 @@ const BATCH_SIZE = 1000;
  */
 export async function GET(request: NextRequest) {
   // proxy.ts already blocks anonymous /api/* requests; check again here anyway.
-  if (!(await getSession())) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // Recipient data: viewers can't download it.
+  const auth = await authorizeRequest("export");
+  if ("response" in auth) return auth.response;
 
   const filters = parseContactFilters(request.nextUrl.searchParams);
   const [keys, list] = await Promise.all([
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
     filters.listId ? getList(filters.listId) : Promise.resolve(null),
   ]);
   const fieldKeys = sortFieldKeys(keys);
+  await audit(auth.session, "contacts.export", { type: "contact", details: { ...filters, list: list?.name } });
   const cursor = await exportContactsCursor(filters, BATCH_SIZE);
   const encoder = new TextEncoder();
 

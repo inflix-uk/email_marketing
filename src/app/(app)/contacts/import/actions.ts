@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireSession } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { COLUMN_TARGETS, mapRows, MAX_IMPORT_ROWS, parseCsv, validateMapping, type ColumnMapping } from "@/lib/contacts/import";
 import { ImportError, runImport, type ImportOutcome } from "@/lib/contacts/run-import";
 
@@ -56,7 +56,7 @@ const importSchema = z
  * only get their names filled in or updated - empty cells never erase anything.
  */
 export async function importContactsAction(_prev: ImportState, formData: FormData): Promise<ImportState> {
-  await requireSession();
+  await requirePermission("edit");
 
   const parsed = importSchema.safeParse({
     csv: String(formData.get("csv") ?? ""),

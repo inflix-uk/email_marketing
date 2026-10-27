@@ -4,7 +4,41 @@ import { startTransition, useActionState, useRef, useState, type FormEvent } fro
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Alert, Input } from "@/components/ui/form";
 import { Badge, Table, TBody, Td } from "@/components/ui/layout";
-import { addTeammate, newInviteLink, type InviteLink, type TeamFormState } from "./actions";
+import { Select } from "@/components/ui/select";
+import { ROLE_DESCRIPTIONS, ROLE_LABELS, ROLES, type Role } from "@/lib/permissions";
+import {
+  addTeammate,
+  changeRoleAction,
+  newInviteLink,
+  type InviteLink,
+  type RoleFormState,
+  type TeamFormState,
+} from "./actions";
+
+function RoleOptions() {
+  return (
+    <>
+      {ROLES.map((r) => (
+        <option key={r} value={r}>
+          {ROLE_LABELS[r]}
+        </option>
+      ))}
+    </>
+  );
+}
+
+/** What each role can do, in one short list. */
+export function RoleHelp() {
+  return (
+    <ul className="space-y-1 text-xs text-slate-500">
+      {ROLES.map((r) => (
+        <li key={r}>
+          <span className="font-medium text-slate-700">{ROLE_LABELS[r]}:</span> {ROLE_DESCRIPTIONS[r]}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // The "set your password" link, shown once
@@ -87,6 +121,9 @@ export function AddTeammateForm({ linkDays }: { linkDays: number }) {
             className="min-w-0 flex-1"
             required
           />
+          <Select name="role" defaultValue="editor" aria-label="Role" className="sm:w-32">
+            <RoleOptions />
+          </Select>
           <Button type="submit" disabled={pending}>
             {pending ? "Adding..." : "Add"}
           </Button>
@@ -108,9 +145,43 @@ export interface TeamRow {
   /** Invited, hasn't set a password yet. */
   pending: boolean;
   isYou: boolean;
+  role: Role;
 }
 
-function Row({ row, canRemove, linkDays }: { row: TeamRow; canRemove: boolean; linkDays: number }) {
+/** Changes the role as soon as another one is picked. */
+function RolePicker({ row }: { row: TeamRow }) {
+  const [state, dispatch, pending] = useActionState<RoleFormState, FormData>(changeRoleAction, {});
+  const formRef = useRef<HTMLFormElement>(null);
+  return (
+    <form ref={formRef} action={dispatch} className="flex items-center gap-2">
+      <input type="hidden" name="id" value={row.id} />
+      <Select
+        name="role"
+        defaultValue={row.role}
+        aria-label={`Role for ${row.email}`}
+        disabled={pending}
+        className="w-28"
+        onChange={() => formRef.current?.requestSubmit()}
+      >
+        <RoleOptions />
+      </Select>
+      {state.error ? <span className="text-xs text-red-600">{state.error}</span> : null}
+      {state.message && !pending ? <span className="text-xs text-emerald-700">Saved</span> : null}
+    </form>
+  );
+}
+
+function Row({
+  row,
+  canRemove,
+  linkDays,
+  manage,
+}: {
+  row: TeamRow;
+  canRemove: boolean;
+  linkDays: number;
+  manage: boolean;
+}) {
   const [state, dispatch, pending] = useActionState<TeamFormState, FormData>(newInviteLink, {});
 
   return (
@@ -125,8 +196,15 @@ function Row({ row, canRemove, linkDays }: { row: TeamRow; canRemove: boolean; l
           </span>
         </Td>
         <Td>
+          {manage && !row.isYou ? (
+            <RolePicker key={row.role} row={row} />
+          ) : (
+            <span className="text-slate-600">{ROLE_LABELS[row.role]}</span>
+          )}
+        </Td>
+        <Td>
           <div className="flex items-center justify-end gap-2">
-            {row.pending ? (
+            {manage && row.pending ? (
               <form action={dispatch}>
                 <input type="hidden" name="id" value={row.id} />
                 <Button type="submit" variant="ghost" size="sm" disabled={pending}>
@@ -134,7 +212,7 @@ function Row({ row, canRemove, linkDays }: { row: TeamRow; canRemove: boolean; l
                 </Button>
               </form>
             ) : null}
-            {!row.isYou && canRemove ? (
+            {manage && !row.isYou && canRemove ? (
               <ButtonLink href={`/settings/team?remove=${row.id}`} variant="ghost" size="sm" className="text-red-700">
                 Remove
               </ButtonLink>
@@ -144,7 +222,7 @@ function Row({ row, canRemove, linkDays }: { row: TeamRow; canRemove: boolean; l
       </tr>
       {state.link || state.error ? (
         <tr>
-          <td colSpan={2} className="px-4 pb-4">
+          <td colSpan={3} className="px-4 pb-4">
             {state.link ? (
               <InviteLinkBox key={state.link.url} link={state.link} linkDays={linkDays} />
             ) : (
@@ -157,13 +235,13 @@ function Row({ row, canRemove, linkDays }: { row: TeamRow; canRemove: boolean; l
   );
 }
 
-export function TeamTable({ rows, linkDays }: { rows: TeamRow[]; linkDays: number }) {
+export function TeamTable({ rows, linkDays, manage }: { rows: TeamRow[]; linkDays: number; manage: boolean }) {
   const canRemove = rows.length > 1;
   return (
     <Table>
       <TBody>
         {rows.map((row) => (
-          <Row key={row.id} row={row} canRemove={canRemove} linkDays={linkDays} />
+          <Row key={row.id} row={row} canRemove={canRemove} linkDays={linkDays} manage={manage} />
         ))}
       </TBody>
     </Table>

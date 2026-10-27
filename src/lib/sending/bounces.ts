@@ -40,7 +40,26 @@ export function recordComplaint(input: Omit<BounceInput, "reason">): Promise<Bou
   return record("complained", { ...input, reason: "Marked the email as spam" });
 }
 
-type MatchedSend = Pick<SendDoc, "_id" | "campaignId" | "kind">;
+/**
+ * A soft bounce (temporary problem: mailbox full, server down). Only marks the
+ * send for the report - the contact keeps its status and the provider retries.
+ * Idempotent. Returns the send id that was marked, or null.
+ */
+export async function recordSoftBounce(input: BounceInput): Promise<string | null> {
+  const email = normalizeEmail(input.email ?? "");
+  if (!email) return null;
+  const send = await findSend(email, input);
+  if (!send) return null;
+  const { sends } = await collections();
+  const now = new Date();
+  const marked = await sends.updateOne(
+    { _id: send._id, softBouncedAt: { $in: [null] }, bouncedAt: { $in: [null] } },
+    { $set: { softBouncedAt: now, updatedAt: now } },
+  );
+  return marked.modifiedCount > 0 ? send._id : null;
+}
+
+type MatchedSend =Pick<SendDoc, "_id" | "campaignId" | "kind">;
 
 /** The send a notification is about: by id, by Message-ID, else the latest email sent to the address. */
 async function findSend(email: string, input: BounceInput): Promise<MatchedSend | null> {

@@ -639,11 +639,15 @@ export async function deleteCampaign(campaignId: string): Promise<ActionState> {
     return { error: "Stop or unschedule this campaign before deleting it." };
   }
 
-  const { campaigns, sends, clicks } = await collections();
+  const { campaigns, sends, clicks, opens } = await collections();
   const result = await campaigns.deleteOne({ _id: campaign.id, status: { $in: deletable }, ...notQueueing() });
   if (result.deletedCount === 0) return { error: "This campaign can't be deleted right now." };
   // Its sends and clicks (the stats) go with it. Contacts, and their unsubscribes, are untouched.
-  await Promise.all([sends.deleteMany({ campaignId: campaign.id }), clicks.deleteMany({ campaignId: campaign.id })]);
+  await Promise.all([
+    sends.deleteMany({ campaignId: campaign.id }),
+    clicks.deleteMany({ campaignId: campaign.id }),
+    opens.deleteMany({ campaignId: campaign.id }),
+  ]);
   await audit(session, "campaign.delete", { type: "campaign", id: campaign.id, details: { subject: campaign.subject, status: campaign.status } });
 
   revalidateCampaigns();

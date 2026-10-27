@@ -48,6 +48,7 @@ export {
 export {
   recordBounce,
   recordComplaint,
+  recordSoftBounce,
   mailboxRejection,
   pauseCampaignIfBouncing,
   bounceRatePercent,
@@ -85,6 +86,7 @@ export {
   isBotUserAgent,
   type UnsubscribeResult,
   type UnsubscribeInfo,
+  type HitMeta,
 } from "./tracking";
 export {
   recoverStuckSends,

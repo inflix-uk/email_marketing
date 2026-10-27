@@ -1,73 +1,31 @@
-import { METRICS, REPORT_TIMEZONE, formatDay, metricValue, type DateRange, type ReportCounts, type ReportRow } from "./rollup";
+import Papa from "papaparse";
 
-// CSV export of the /reports table. Pure: the route only gathers the data.
+// CSV for report exports. Every cell is a string; cells that a spreadsheet
+// would run as a formula (= + - @, tab, CR) get a leading apostrophe.
+
+export type CsvCell = string | number | Date | null | undefined;
 
 /** Byte-order mark: tells Excel the file is UTF-8. */
-const BOM = String.fromCharCode(0xfeff);
+export const CSV_BOM = String.fromCharCode(0xfeff);
 
-/** Characters that make a spreadsheet treat a cell as a formula. */
-const FORMULA_START = /^[=+\-@\t\r]/;
-
-/**
- * One CSV cell. Text that a spreadsheet would run as a formula (=, +, -, @,
- * tab, CR at the start) gets a leading apostrophe; cells with a comma, quote
- * or line break are quoted. Numbers are written as they are.
- */
-export function csvCell(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
-  let text = value;
-  if (FORMULA_START.test(text)) text = `'${text}`;
-  return /[",\r\n]/.test(text) || text !== value ? `"${text.replace(/"/g, '""')}"` : text;
+export function csvSafeCell(value: CsvCell): string {
+  const text = value === null || value === undefined ? "" : value instanceof Date ? value.toISOString() : String(value);
+  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
 }
 
-export function csvLine(cells: (string | number | null | undefined)[]): string {
-  return `${cells.map(csvCell).join(",")}\r\n`;
+/** Rows -> CSV text (CRLF line endings, trailing newline). */
+export function toCsv(rows: CsvCell[][]): string {
+  if (rows.length === 0) return "";
+  return `${Papa.unparse(rows.map((r) => r.map(csvSafeCell)), { newline: "\r\n" })}\r\n`;
 }
 
-/** Rates as percentages with 2 decimals; N/A stays empty-safe as "N/A". */
-function metricCells(c: ReportCounts): (string | number)[] {
-  return METRICS.map((m) => {
-    const v = metricValue(c, m.key);
-    if (v === null) return "N/A";
-    return m.kind === "rate" ? Math.round(v * 10000) / 100 : v;
-  });
-}
-
-export interface ReportCsvInput {
-  /** e.g. "All campaigns" or "List: Newsletter". */
-  scope: string;
-  range: DateRange;
-  groupLabel: string;
-  generatedAt: Date;
-  rows: ReportRow[];
-  total: ReportCounts;
-}
-
-const generatedFmt = new Intl.DateTimeFormat("en-GB", {
-  timeZone: REPORT_TIMEZONE,
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-/** The whole CSV: a few header rows (scope, dates, timezone, generated), then the table and a total row. */
-export function reportToCsv(input: ReportCsvInput): string {
-  const head = [input.groupLabel, ...METRICS.map((m) => (m.kind === "rate" ? `${m.label} (%)` : m.label))];
-  return (
-    BOM +
-    csvLine(["Report", "Campaign results"]) +
-    csvLine(["Scope", input.scope]) +
-    csvLine(["Dates", `${formatDay(input.range.from)} to ${formatDay(input.range.to)}`]) +
-    csvLine(["Timezone", REPORT_TIMEZONE]) +
-    csvLine(["Generated", generatedFmt.format(input.generatedAt)]) +
-    "\r\n" +
-    csvLine(head) +
-    input.rows.map((r) => csvLine([r.label, ...metricCells(r.counts)])).join("") +
-    csvLine(["Total", ...metricCells(input.total)])
-  );
-}
-
-/** "campaign-results-2026-10-01-to-2026-10-27.csv" */
-export function reportFileName(range: DateRange): string {
-  return `campaign-results-${range.from}-to-${range.to}.csv`;
+/** "Spring sale!" -> "spring-sale-links-2026-10-13.csv" */
+export function csvFileName(name: string, suffix: string, now = new Date()): string {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
+  return `${slug || "campaign"}-${suffix}-${now.toISOString().slice(0, 10)}.csv`;
 }

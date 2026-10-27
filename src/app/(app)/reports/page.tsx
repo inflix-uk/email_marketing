@@ -212,7 +212,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                 </TBody>
               </Table>
               <p className="px-5 py-3 text-xs text-slate-500">
-                Open and click rates use delivered emails (sent minus bounces). CTOR = clicks ÷ opens. Test emails are not
+                Open and click rates are out of emails sent, the same as each campaign report. CTOR = clicks ÷ opens. Test emails are not
                 counted. Times are {REPORT_TIMEZONE}.
               </p>
             </Card>

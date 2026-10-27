@@ -11,6 +11,7 @@ import type {
   EnrollmentDoc,
   FormDoc,
   ListDoc,
+  OpenDoc,
   RateLimitDoc,
   ReportDoc,
   SegmentDoc,
@@ -78,6 +79,7 @@ export async function collections() {
     campaigns: db.collection<CampaignDoc>("campaigns"),
     sends: db.collection<SendDoc>("sends"),
     clicks: db.collection<ClickDoc>("clicks"),
+    opens: db.collection<OpenDoc>("opens"),
     users: db.collection<UserDoc>("users"),
     settings: db.collection<SettingsDoc>("settings"),
     segments: db.collection<SegmentDoc>("segments"),
@@ -120,6 +122,7 @@ async function ensureIndexes(db: Db): Promise<void> {
       { key: { status: 1, automationId: 1, nextRunAt: 1 } },
     ]),
     db.collection("clicks").createIndexes([{ key: { campaignId: 1 } }, { key: { sendId: 1 } }]),
+    db.collection("opens").createIndexes([{ key: { campaignId: 1, createdAt: 1 } }, { key: { sendId: 1 } }]),
     db.collection("users").createIndexes([{ key: { email: 1 }, unique: true }, { key: { resetTokenHash: 1 }, sparse: true }]),
     db.collection("sends").createIndexes([{ key: { email: 1, sentAt: -1 } }, { key: { sentAt: 1 } }, { key: { messageId: 1 }, sparse: true }]),
     db.collection("enrollments").createIndexes([

@@ -57,8 +57,8 @@ export interface ReportRates {
 
 export function ratesOf(c: ReportCounts): ReportRates {
   return {
-    openRate: rate(c.opens, c.delivered),
-    clickRate: rate(c.clicks, c.delivered),
+    openRate: rate(c.opens, c.sent),
+    clickRate: rate(c.clicks, c.sent),
     ctor: rate(c.clicks, c.opens),
   };
 }

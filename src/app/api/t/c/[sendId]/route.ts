@@ -1,11 +1,13 @@
 import type { NextRequest } from "next/server";
-import { isBotUserAgent, recordClick } from "@/lib/sending";
+import { countryFromHeaders } from "@/lib/reports/user-agent";
+import { recordClick } from "@/lib/sending";
 import { getLinkContext, verifyClick, type LinkContext } from "@/lib/tokens";
 
 // Click-tracking redirect. Public (see src/proxy.ts). The target URL is
 // HMAC-signed together with the send id, so this can't be used as an open
-// redirect. Link scanners and bots (by User-Agent, see isBotUserAgent) are
-// redirected like everyone else, but their clicks aren't counted.
+// redirect. Every click is recorded with its user agent and country header;
+// link scanners and clicks within 2 s of sending are flagged as suspected
+// bots (see recordClick) so reports can leave them out.
 
 function textResponse(body: string, status: number): Response {
   return new Response(body, {
@@ -53,12 +55,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!ctx) return unavailable();
   const url = target(ctx, sendId, request);
   if (!url) return invalid();
-  if (!isBotUserAgent(request.headers.get("user-agent"))) {
-    try {
-      await recordClick(sendId, request.nextUrl.searchParams.get("u")!);
-    } catch (err) {
-      console.error("[tracking] failed to record click", err);
-    }
+  try {
+    await recordClick(sendId, request.nextUrl.searchParams.get("u")!, {
+      userAgent: request.headers.get("user-agent"),
+      country: countryFromHeaders(request.headers),
+    });
+  } catch (err) {
+    console.error("[tracking] failed to record click", err);
   }
   return redirectTo(url);
 }

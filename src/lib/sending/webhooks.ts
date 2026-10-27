@@ -3,8 +3,9 @@
 // src/app/api/webhooks/[provider]/route.ts.
 //
 // Only PERMANENT failures count as bounces. Soft/transient bounces (mailbox
-// full, temporary outage) and every other event type are understood and
-// ignored - the provider retries those deliveries itself.
+// full, temporary outage) become "soft_bounce" events: they only show in the
+// campaign report and never change the contact - the provider retries those
+// deliveries itself. Every other event type is understood and ignored.
 
 import { isValidEmail, normalizeEmail } from "@/lib/utils";
 
@@ -16,7 +17,7 @@ export function isWebhookProvider(value: string): value is WebhookProvider {
 }
 
 export interface FeedbackEvent {
-  type: "bounce" | "complaint";
+  type: "bounce" | "soft_bounce" | "complaint";
   /** Normalized (lower-cased) recipient address. */
   email: string;
   reason?: string;
@@ -128,11 +129,12 @@ function parseSes(body: Json): ParsedWebhook {
   const events: FeedbackEvent[] = [];
   if (kind === "bounce") {
     const bounce = obj(message.bounce);
-    if (lower(bounce.bounceType) !== "permanent") return done([]); // Transient / Undetermined
+    const bounceType = lower(bounce.bounceType);
+    if (bounceType !== "permanent" && bounceType !== "transient") return done([]); // Undetermined
     for (const r of Array.isArray(bounce.bouncedRecipients) ? bounce.bouncedRecipients : []) {
       const rec = obj(r);
       const reason = str(rec.diagnosticCode) ?? [str(bounce.bounceType), str(bounce.bounceSubType)].filter(Boolean).join(" / ");
-      events.push(...event("bounce", rec.emailAddress, reason, messageId));
+      events.push(...event(bounceType === "permanent" ? "bounce" : "soft_bounce", rec.emailAddress, reason, messageId));
     }
   } else if (kind === "complaint") {
     const complaint = obj(message.complaint);
@@ -151,10 +153,10 @@ function parseResend(body: Json): ParsedWebhook {
   if (type === "email.bounced") {
     const bounce = obj(data.bounce);
     const bounceType = lower(bounce.type);
-    // Resend reports permanent bounces here; skip anything explicitly temporary.
-    if (bounceType && bounceType !== "permanent") return done([]);
+    // Resend reports permanent bounces here; anything explicitly temporary is a soft bounce.
+    const type = bounceType && bounceType !== "permanent" ? "soft_bounce" : "bounce";
     const reason = str(bounce.message) ?? str(bounce.subType);
-    return done(recipients.flatMap((to) => event("bounce", to, reason, data.email_id)));
+    return done(recipients.flatMap((to) => event(type, to, reason, data.email_id)));
   }
   if (type === "email.complained") {
     return done(recipients.flatMap((to) => event("complaint", to, undefined, data.email_id)));
@@ -170,7 +172,8 @@ function parseBrevo(body: Json): ParsedWebhook {
     return done(event("bounce", body.email, str(body.reason) ?? kind.replace("_", " "), messageId));
   }
   if (kind === "spam" || kind === "complaint") return done(event("complaint", body.email, undefined, messageId));
-  return done([]); // soft_bounce, deferred, delivered, opened...
+  if (kind === "soft_bounce") return done(event("soft_bounce", body.email, str(body.reason) ?? "soft bounce", messageId));
+  return done([]); // deferred, delivered, opened...
 }
 
 /** Mailgun: { signature, "event-data": { event: "failed" | "complained", severity, recipient, ... } }. */
@@ -179,9 +182,10 @@ function parseMailgun(body: Json): ParsedWebhook {
   const kind = lower(data.event);
   const messageId = obj(obj(data.message).headers)["message-id"];
   if (kind === "failed") {
-    if (lower(data.severity) !== "permanent") return done([]); // temporary: Mailgun retries
+    // temporary: Mailgun retries - only a soft bounce
+    const type = lower(data.severity) === "permanent" ? "bounce" : "soft_bounce";
     const status = obj(data["delivery-status"]);
-    return done(event("bounce", data.recipient, str(status.message) ?? str(status.description) ?? data.reason, messageId));
+    return done(event(type, data.recipient, str(status.message) ?? str(status.description) ?? data.reason, messageId));
   }
   if (kind === "complained") return done(event("complaint", data.recipient, undefined, messageId));
   return done([]);

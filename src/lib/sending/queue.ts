@@ -7,6 +7,7 @@
 import type { Filter } from "mongodb";
 import { collections, isDuplicateKeyError } from "@/db";
 import { newId, type CampaignDoc, type CampaignStatus, type SendDoc } from "@/db/schema";
+import { campaignTypeProblems, campaignTypeStartFields, createTypeAllocator } from "@/lib/campaign-types/hooks";
 import { isValidEmail } from "@/lib/utils";
 import { abHoldbackMs, createAbAssigner, hasAbTest } from "./ab";
 import { CampaignError } from "./errors";
@@ -45,6 +46,8 @@ export async function getCampaignProblems(campaignId: string): Promise<string[]>
   if (campaign.abTest && !hasAbTest(campaign.abTest)) {
     problems.push("Add the second subject line for the A/B test, or turn the test off");
   }
+  // Campaign types (A/B test versions, RSS series...): see src/lib/campaign-types.
+  problems.push(...campaignTypeProblems(campaign));
 
   const listIds = campaign.listIds ?? [];
   const segmentIds = campaign.segmentIds ?? [];
@@ -128,7 +131,10 @@ export async function queueCampaign(campaignId: string): Promise<{ queued: numbe
   const claimed = await campaigns.findOneAndUpdate(
     { _id: campaignId, status: { $in: ["draft", "scheduled"] }, ...queueLockFree(lockedAt) },
     { $set: { queueLockedAt: lockedAt, updatedAt: lockedAt } },
-    { returnDocument: "after", projection: { listIds: 1, segmentIds: 1, abTest: 1 } },
+    {
+      returnDocument: "after",
+      projection: { listIds: 1, segmentIds: 1, abTest: 1, type: 1, variantTest: 1, resend: 1, rss: 1 },
+    },
   );
   if (!claimed) {
     const current = await campaigns.findOne({ _id: campaignId }, { projection: { status: 1, queueLockedAt: 1 } });
@@ -172,6 +178,7 @@ export async function queueCampaign(campaignId: string): Promise<{ queued: numbe
         })
       : null;
     const afterTest = abTest ? new Date(now.getTime() + abHoldbackMs(abTest)) : now;
+    const typeAllocator = createTypeAllocator(campaignId, claimed);
     const cursor = contacts.find(audience, { projection: { _id: 1, email: 1 } }).batchSize(INSERT_CHUNK);
     let chunk: SendDoc[] = [];
     const flush = async () => {
@@ -186,6 +193,11 @@ export async function queueCampaign(campaignId: string): Promise<{ queued: numbe
         if (assign) {
           send.variant = assign();
           if (send.variant === null) send.nextAttemptAt = afterTest;
+        } else if (typeAllocator) {
+          // Campaign-type A/B test: deterministic variant per contact; the rest is held for the winner.
+          const allocation = typeAllocator(contact._id);
+          send.variant = allocation.variant;
+          if (allocation.nextAttemptAt) send.nextAttemptAt = allocation.nextAttemptAt;
         }
         chunk.push(send);
         if (chunk.length >= INSERT_CHUNK) await flush();
@@ -214,6 +226,7 @@ export async function queueCampaign(campaignId: string): Promise<{ queued: numbe
           updatedAt: started,
           // A fresh test: no winner yet (matters for campaigns copied from a finished one).
           ...(claimed.abTest ? { "abTest.winner": null, "abTest.decidedAt": null } : {}),
+          ...campaignTypeStartFields(claimed, started),
         },
         $unset: { queueLockedAt: "" },
       },

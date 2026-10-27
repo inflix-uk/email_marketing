@@ -31,7 +31,8 @@ type Row = {
 export default async function CampaignsPage({ searchParams }: { searchParams: Promise<{ page?: string | string[] }> }) {
   const params = await searchParams;
   const { campaigns, contacts } = await collections();
-  const total = await campaigns.countDocuments({});
+  // Runs of an RSS series and auto resends (child campaigns) are listed on their parent instead.
+  const total = await campaigns.countDocuments({ parentId: null });
 
   const newButton = <ButtonLink href="/campaigns/new">New campaign</ButtonLink>;
   const header = <PageHeader title="Campaigns" actions={newButton} />;
@@ -56,7 +57,7 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
   const page = Math.min(parsePage(params.page), pageCount);
   const docs = await campaigns
     .find(
-      {},
+      { parentId: null },
       {
         projection: {
           name: 1,

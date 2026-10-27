@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/auth";
 import { deleteCampaign, unscheduleCampaign, type ComposeNotice } from "../actions";
 import { ActionButton, ConfirmButton } from "../_components/action-buttons";
 import { ComposeForm } from "../_components/compose-form";
+import { CampaignTypeSection } from "../_components/type-section";
 import { LocalDateTime } from "../_components/local-time";
 import { getComposeData } from "../_lib/compose-data";
 import { displaySubject } from "../_lib/display";
@@ -59,6 +60,7 @@ export async function CampaignEditor({ campaign, notice }: { campaign: Campaign;
         data={data}
         defaultTestTo={session.email}
         notice={NOTICES.find((n) => n === notice)}
+        typeOptions={<CampaignTypeSection campaign={campaign} designs={data.designs} />}
       />
     </>
   );

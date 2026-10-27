@@ -103,6 +103,9 @@ async function ensureIndexes(db: Db): Promise<void> {
     db.collection("campaigns").createIndexes([
       { key: { status: 1, scheduledAt: 1 } },
       { key: { updatedAt: -1 } },
+      // Campaign types: runs of an RSS series / a resend, and the worker's due checks.
+      { key: { parentId: 1, createdAt: -1 }, sparse: true },
+      { key: { type: 1, status: 1 }, sparse: true },
     ]),
     db.collection("sends").createIndexes([
       { key: { campaignId: 1, contactId: 1 }, unique: true },

@@ -22,7 +22,8 @@
 
 import type { Filter } from "mongodb";
 import { collections } from "@/db";
-import type { AbTest, CampaignDoc, SendDoc } from "@/db/schema";
+import type { AbTest, CampaignDoc, SendDoc, VariantTest } from "@/db/schema";
+import { contentForVariant } from "@/lib/campaign-types/hooks";
 import { classifySendError, sendEmail, type OutgoingEmail, type SendResult } from "@/lib/mailer";
 import { getSettings } from "@/lib/settings";
 import { getLinkContext } from "@/lib/tokens";
@@ -216,7 +217,8 @@ export async function finalizeCampaigns(
 ): Promise<{ id: string; name: string }[]> {
   if (opts.campaignIds && opts.campaignIds.length === 0) return [];
   const { campaigns, sends } = await collections();
-  const filter: Filter<CampaignDoc> = { status: "sending" };
+  // An active RSS series is "sending" with no sends of its own: its runs are child campaigns.
+  const filter: Filter<CampaignDoc> = { status: "sending", type: { $ne: "rss" } };
   if (opts.campaignIds) filter._id = { $in: opts.campaignIds };
   const active = await campaigns.find(filter, { projection: { _id: 1, name: 1 } }).toArray();
 
@@ -302,7 +304,7 @@ export interface BatchResult {
 
 type Outcome = "sent" | "failed" | "retried" | "skipped" | "errors" | "config" | "none";
 
-type CampaignContent = EmailContent & { id: string; abTest: AbTest | null };
+type CampaignContent = EmailContent & { id: string; abTest: AbTest | null; variantTest: VariantTest | null };
 
 type Candidate = Pick<SendDoc, "_id" | "campaignId" | "variant">;
 
@@ -334,7 +336,17 @@ export async function processBatch(opts: ProcessBatchOptions = {}): Promise<Batc
   if (opts.campaignIds) campaignFilter._id = { $in: opts.campaignIds };
   const active = await campaigns
     .find(campaignFilter, {
-      projection: { _id: 1, subject: 1, previewText: 1, html: 1, fromName: 1, fromEmail: 1, replyTo: 1, abTest: 1 },
+      projection: {
+        _id: 1,
+        subject: 1,
+        previewText: 1,
+        html: 1,
+        fromName: 1,
+        fromEmail: 1,
+        replyTo: 1,
+        abTest: 1,
+        variantTest: 1,
+      },
     })
     .toArray();
   if (active.length === 0) return result;
@@ -350,6 +362,7 @@ export async function processBatch(opts: ProcessBatchOptions = {}): Promise<Batc
         fromEmail: c.fromEmail,
         replyTo: c.replyTo,
         abTest: c.abTest ?? null,
+        variantTest: c.variantTest ?? null,
       },
     ]),
   );
@@ -455,8 +468,10 @@ async function processOne(
     // 3. Build the message (A/B tests: with this send's subject line).
     let message: OutgoingEmail;
     try {
-      const subject = subjectForVariant(campaign.subject, campaign.abTest, item.variant);
-      message = buildCampaignEmail({ ...campaign, subject }, { ...contact, fields: contact.fields ?? {} }, sendId, build);
+      // Campaign-type A/B tests: this send's version (subject / design / sender name).
+      const version = contentForVariant(campaign, campaign.variantTest, item.variant);
+      const subject = subjectForVariant(version.subject, campaign.abTest, item.variant);
+      message = buildCampaignEmail({ ...version, subject }, { ...contact, fields: contact.fields ?? {} }, sendId, build);
     } catch (err) {
       await finish(sendId, { status: "failed", attempts, lastError: `Could not build the email: ${errorMessage(err)}` });
       return "failed";

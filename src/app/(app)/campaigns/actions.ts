@@ -6,6 +6,7 @@ import { z } from "zod";
 import { collections } from "@/db";
 import { fromDoc, newId, type CampaignDoc, type CampaignStatus } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
+import { parseCampaignTypeFields, runCampaignTypeIntent } from "@/lib/campaign-types/form";
 import { getSettings } from "@/lib/settings";
 import {
   CampaignError,
@@ -214,6 +215,10 @@ export async function submitCampaign(
     if (when.getTime() - Date.now() > MAX_SCHEDULE_AHEAD_MS) return { error: "You can schedule up to a year ahead." };
   }
 
+  // Campaign type (A/B test / auto resend / RSS) settings - see src/lib/campaign-types/form.ts.
+  const typed = await parseCampaignTypeFields(formData, existing);
+  if (!typed.ok) return { error: typed.error, fieldErrors: typed.fieldErrors };
+
   const settings = await getSettings();
   if (intent === "send" || intent === "schedule") {
     if (!subject) return { error: "Add a subject.", fieldErrors: { subject: ["Add a subject."] } };
@@ -239,6 +244,7 @@ export async function submitCampaign(
     fromEmail: settings.fromEmail,
     replyTo: settings.replyTo || null,
     ...content,
+    ...typed.fields,
     updatedAt: now,
   };
   const { campaigns } = await collections();
@@ -272,7 +278,9 @@ export async function submitCampaign(
   revalidateCampaigns();
 
   // --- Then the action
-  const result = await runIntent(id, intent, { testTo, when, wasScheduled: existing?.status === "scheduled" });
+  const result =
+    (await runCampaignTypeIntent(id, intent, when)) ??
+    (await runIntent(id, intent, { testTo, when, wasScheduled: existing?.status === "scheduled" }));
 
   if (!existing) {
     // A new campaign now has its own page; carry the outcome over.

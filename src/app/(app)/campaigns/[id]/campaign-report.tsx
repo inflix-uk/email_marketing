@@ -10,6 +10,7 @@ import { ActionButton, ConfirmButton } from "../_components/action-buttons";
 import { DownloadLink } from "../_components/download-link";
 import { FilterTabs } from "../_components/filter-tabs";
 import { Pagination } from "../_components/pagination";
+import { CampaignTypeResults } from "../_components/type-results";
 import { displaySubject } from "../_lib/display";
 import {
   getListNames,
@@ -167,6 +168,8 @@ export async function CampaignReport({ campaign, filter, page }: { campaign: Cam
         <Stat label="Unsubscribed" value={formatNumber(stats.unsubscribed)} />
         <Stat label="Bounced" value={formatNumber(stats.bounced)} />
       </div>
+
+      <CampaignTypeResults campaign={campaign} />
 
       <div className="grid items-start gap-6 xl:grid-cols-5">
         <Card id="recipients" className="scroll-mt-6 overflow-hidden xl:col-span-3">

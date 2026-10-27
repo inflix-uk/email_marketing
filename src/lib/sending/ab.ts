@@ -99,7 +99,7 @@ export function pickWinner(a: VariantResult, b: VariantResult): Variant {
 }
 
 /** A non-test send of an A/B campaign whose winner hasn't been picked yet. */
-export function needsWinner(abTest: Partial<AbSettings> | null | undefined, variant: Variant | null | undefined): boolean {
+export function needsWinner(abTest: Partial<AbSettings> | null | undefined, variant: string | null | undefined): boolean {
   return hasAbTest(abTest) && variant !== "A" && variant !== "B" && abTest.winner !== "A" && abTest.winner !== "B";
 }
 
@@ -107,7 +107,7 @@ export function needsWinner(abTest: Partial<AbSettings> | null | undefined, vari
 export function subjectForVariant(
   subject: string,
   abTest: Partial<AbSettings> | null | undefined,
-  variant: Variant | null | undefined,
+  variant: string | null | undefined,
 ): string {
   if (!hasAbTest(abTest)) return subject;
   const which = variant === "A" || variant === "B" ? variant : abTest.winner;

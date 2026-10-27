@@ -19,6 +19,14 @@ export {
 } from "./queue";
 export { sendTestEmail, MAX_TEST_RECIPIENTS } from "./test-send";
 export {
+  sendTemplateTestEmails,
+  recentTemplateTests,
+  templateTestHash,
+  TEST_PROFILE,
+  type TemplateTestInput,
+  type TemplateTestResult,
+} from "./template-test";
+export {
   getCampaignStats,
   getCampaignsStats,
   getTopLinks,

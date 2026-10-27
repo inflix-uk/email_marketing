@@ -2,11 +2,11 @@
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import { EmailEditor } from "@/components/email-editor";
+import { SpamCheckPanel } from "@/components/spam-check-panel";
 import { Button } from "@/components/ui/button";
 import { Alert, Field, Input } from "@/components/ui/form";
-import { cn } from "@/lib/utils";
 import { saveTemplate, type SaveTemplateState } from "../actions";
-import { sendTemplateTest, type SendTestState } from "./actions";
+import { TestSendDialog, type TemplateTestLogItem } from "./test-send-dialog";
 
 export interface EditableTemplate {
   id: string;
@@ -25,23 +25,24 @@ const EDITOR_HEIGHT = "max(28rem, calc(100dvh - 13.5rem))";
 export function TemplateForm({
   template,
   testRecipient,
+  tests = [],
   secondaryActions,
 }: {
   /** The saved version; re-fetched after every save. */
   template: EditableTemplate;
   /** Pre-filled test address (the signed-in user). */
   testRecipient: string;
+  /** The last few test sends of this template, newest first. */
+  tests?: TemplateTestLogItem[];
   /** Quiet actions (duplicate, delete) shown at the end of the bottom row. */
   secondaryActions?: ReactNode;
 }) {
   const [saveState, saveAction, saving] = useActionState<SaveTemplateState, FormData>(saveTemplate, {});
-  const [testState, testAction, testing] = useActionState<SendTestState, FormData>(sendTemplateTest, {});
 
   const [name, setName] = useState(template.name);
   const [subject, setSubject] = useState(template.subject ?? "");
   const [html, setHtml] = useState(template.html);
   const [design, setDesign] = useState(template.design ?? "");
-  const [testTo, setTestTo] = useState(testRecipient);
   const formRef = useRef<HTMLFormElement>(null);
 
   const dirty =
@@ -123,46 +124,22 @@ export function TemplateForm({
         />
       </form>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <form
-          action={(formData) => {
-            formData.set("name", name);
-            formData.set("subject", subject);
-            formData.set("previewText", template.previewText ?? "");
-            formData.set("html", html);
-            testAction(formData);
-          }}
-          className="flex flex-wrap items-center gap-2"
-        >
-          <label htmlFor="test-to" className="text-sm text-slate-600">
-            Send a test to
-          </label>
-          <Input
-            id="test-to"
-            name="to"
-            value={testTo}
-            onChange={(e) => setTestTo(e.target.value)}
-            inputMode="email"
-            autoComplete="email"
-            placeholder="you@example.com"
-            required
-            className="w-64"
-          />
-          <Button type="submit" variant="secondary" disabled={testing}>
-            {testing ? "Sending..." : "Send test"}
-          </Button>
-          {!testing && (testState.error || testState.message) ? (
-            <p
-              role={testState.error ? "alert" : "status"}
-              className={cn(
-                "text-sm",
-                testState.error ? "text-red-600" : testState.warning ? "text-amber-700" : "text-emerald-700",
-              )}
-            >
-              {testState.error ?? testState.message}
-            </p>
-          ) : null}
-        </form>
+      <div className="mt-3 flex flex-wrap items-start gap-x-6 gap-y-3">
+        <TestSendDialog
+          templateId={template.id}
+          name={name}
+          subject={subject}
+          previewText={template.previewText ?? ""}
+          html={html}
+          defaultTo={testRecipient}
+          tests={tests}
+        />
+        <SpamCheckPanel
+          subject={subject}
+          preheader={template.previewText}
+          html={html}
+          className="min-w-0 flex-1 basis-80"
+        />
 
         {secondaryActions ? <div className="ml-auto flex items-center gap-1">{secondaryActions}</div> : null}
       </div>

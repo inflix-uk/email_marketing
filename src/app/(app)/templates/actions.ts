@@ -248,10 +248,11 @@ export async function deleteTemplate(formData: FormData): Promise<void> {
   await requireSession();
   const id = text(formData, "id");
   if (id) {
-    const { templates, campaigns } = await collections();
+    const { templates, campaigns, testSends } = await collections();
     await templates.deleteOne({ _id: id });
     // No foreign keys: unlink campaigns ourselves. They keep their own copy of the HTML.
     await campaigns.updateMany({ templateId: id }, { $set: { templateId: null } });
+    await testSends.deleteMany({ templateId: id });
   }
   templatePaths(id);
   redirect("/templates");

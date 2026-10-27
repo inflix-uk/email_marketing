@@ -82,6 +82,25 @@ export interface TemplateDoc {
   updatedAt: Date;
 }
 
+/**
+ * [test_sends] One template test email to one address (the template test
+ * centre). Never a campaign send: no contact, no stats.
+ */
+export interface TestSendDoc {
+  _id: string;
+  templateId: string;
+  /** contentHash({ subject, html }) of what was sent, to spot later edits. */
+  contentHash: string;
+  to: string;
+  subject: string;
+  /** "Name <address>" of the sender used. */
+  sender: string;
+  status: "sent" | "failed";
+  error: string | null;
+  providerMessageId: string | null;
+  createdAt: Date;
+}
+
 /** A/B subject test: part of the audience gets subject A or B; the rest gets the winner. */
 export interface AbTest {
   subjectB: string;

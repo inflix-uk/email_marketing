@@ -6,6 +6,8 @@ import { SubmitButton } from "@/components/ui/button";
 import { collections } from "@/db";
 import { fromDoc } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
+import { recentTemplateTests } from "@/lib/sending";
+import { formatDateTime } from "@/lib/utils";
 import { duplicateTemplate } from "../actions";
 import { DeleteTemplateButton } from "../delete-template-button";
 import { TemplateForm } from "./template-form";
@@ -26,8 +28,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function TemplatePage({ params }: Props) {
   const { id } = await params;
-  const [template, session] = await Promise.all([getTemplate(id), requireSession()]);
+  const [template, session, testLog] = await Promise.all([getTemplate(id), requireSession(), recentTemplateTests(id)]);
   if (!template) notFound();
+  const tests = testLog.map((t) => ({
+    id: t._id,
+    to: t.to,
+    subject: t.subject,
+    status: t.status,
+    error: t.error,
+    contentHash: t.contentHash,
+    when: formatDateTime(t.createdAt),
+  }));
 
   return (
     <>
@@ -50,6 +61,7 @@ export default async function TemplatePage({ params }: Props) {
           design: template.design ?? null,
         }}
         testRecipient={session.email}
+        tests={tests}
         secondaryActions={
           <>
             <form action={duplicateTemplate}>

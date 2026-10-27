@@ -14,6 +14,7 @@ import type {
   SegmentDoc,
   SendDoc,
   TemplateDoc,
+  TestSendDoc,
   UserDoc,
 } from "./schema";
 
@@ -71,6 +72,7 @@ export async function collections() {
     contacts: db.collection<ContactDoc>("contacts"),
     lists: db.collection<ListDoc>("lists"),
     templates: db.collection<TemplateDoc>("templates"),
+    testSends: db.collection<TestSendDoc>("test_sends"),
     campaigns: db.collection<CampaignDoc>("campaigns"),
     sends: db.collection<SendDoc>("sends"),
     clicks: db.collection<ClickDoc>("clicks"),
@@ -100,6 +102,7 @@ async function ensureIndexes(db: Db): Promise<void> {
     ]),
     db.collection("lists").createIndexes([{ key: { createdAt: -1 } }]),
     db.collection("templates").createIndexes([{ key: { updatedAt: -1 } }]),
+    db.collection("test_sends").createIndexes([{ key: { templateId: 1, createdAt: -1 } }]),
     db.collection("campaigns").createIndexes([
       { key: { status: 1, scheduledAt: 1 } },
       { key: { updatedAt: -1 } },

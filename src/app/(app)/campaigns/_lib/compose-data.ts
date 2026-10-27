@@ -1,6 +1,8 @@
 import { collections } from "@/db";
 import { fromDoc, type Campaign } from "@/db/schema";
+import { listTimeZones } from "@/lib/schedule";
 import { countRecipients } from "@/lib/sending";
+import { getSettings } from "@/lib/settings";
 import { STARTER_TEMPLATES } from "@/lib/starter-templates";
 import { getListsWithCounts, type ListOption } from "./queries";
 import { CURRENT_DESIGN, starterValue, templateValue } from "./starting-points";
@@ -11,6 +13,8 @@ export interface DesignOption {
   name: string;
   /** Suggested subject (filled in when the subject is still empty). */
   subject: string;
+  /** Suggested preview text (filled in while the field is untouched). */
+  previewText: string;
   html: string;
   /** Saved templates can be opened for editing. */
   templateId: string | null;
@@ -22,6 +26,11 @@ export interface ComposeData {
   lists: ListOption[];
   initialListIds: string[];
   initialRecipients: number;
+  /** From Settings, shown read-only. */
+  sender: { name: string; email: string };
+  /** Reply-to used when the campaign doesn't set its own. */
+  defaultReplyTo: string;
+  timeZones: string[];
 }
 
 /** Saved templates offered in the picker (most recently edited first). */
@@ -30,7 +39,7 @@ const MAX_TEMPLATES = 50;
 /** Everything the compose form needs, for a new campaign or an existing draft. */
 export async function getComposeData(campaign?: Campaign, requestedTemplateId?: string): Promise<ComposeData> {
   const { templates } = await collections();
-  const projection = { name: 1, subject: 1, html: 1 };
+  const projection = { name: 1, subject: 1, previewText: 1, html: 1 };
   const saved = (await templates.find({}, { projection }).sort({ updatedAt: -1, _id: 1 }).limit(MAX_TEMPLATES).toArray()).map(
     fromDoc,
   );
@@ -43,8 +52,22 @@ export async function getComposeData(campaign?: Campaign, requestedTemplateId?: 
 
   // Your own templates; the built-in designs only until you have some (no duplicates).
   const designs: DesignOption[] = saved.length
-    ? saved.map((t) => ({ value: templateValue(t.id), name: t.name, subject: t.subject ?? "", html: t.html, templateId: t.id }))
-    : STARTER_TEMPLATES.map((t) => ({ value: starterValue(t.key), name: t.name, subject: t.subject, html: t.html, templateId: null }));
+    ? saved.map((t) => ({
+        value: templateValue(t.id),
+        name: t.name,
+        subject: t.subject ?? "",
+        previewText: t.previewText ?? "",
+        html: t.html,
+        templateId: t.id,
+      }))
+    : STARTER_TEMPLATES.map((t) => ({
+        value: starterValue(t.key),
+        name: t.name,
+        subject: t.subject,
+        previewText: t.previewText ?? "",
+        html: t.html,
+        templateId: null,
+      }));
 
   let initialDesign = designs[0]?.value ?? CURRENT_DESIGN;
   if (campaign) {
@@ -57,17 +80,33 @@ export async function getComposeData(campaign?: Campaign, requestedTemplateId?: 
     if (match) {
       initialDesign = match.value;
     } else {
-      designs.unshift({ value: CURRENT_DESIGN, name: "Current design", subject: campaign.subject, html: campaign.html, templateId: null });
+      designs.unshift({
+        value: CURRENT_DESIGN,
+        name: "Current design",
+        subject: campaign.subject,
+        previewText: campaign.previewText ?? "",
+        html: campaign.html,
+        templateId: null,
+      });
       initialDesign = CURRENT_DESIGN;
     }
   } else if (requestedTemplateId && saved.some((t) => t.id === requestedTemplateId)) {
     initialDesign = templateValue(requestedTemplateId);
   }
 
-  const lists = await getListsWithCounts();
+  const [lists, settings] = await Promise.all([getListsWithCounts(), getSettings()]);
   const known = new Set(lists.map((l) => l.id));
   const initialListIds = (campaign?.listIds ?? []).filter((id) => known.has(id));
   const initialRecipients = initialListIds.length ? await countRecipients(initialListIds) : 0;
 
-  return { designs, initialDesign, lists, initialListIds, initialRecipients };
+  return {
+    designs,
+    initialDesign,
+    lists,
+    initialListIds,
+    initialRecipients,
+    sender: { name: settings.fromName, email: settings.fromEmail },
+    defaultReplyTo: settings.replyTo,
+    timeZones: listTimeZones(),
+  };
 }

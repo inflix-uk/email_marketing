@@ -18,6 +18,8 @@ export interface OutgoingEmail {
   html: string;
   /** Plain-text part; derived from html when omitted. */
   text?: string;
+  /** Send only the text part (plain-text campaigns); `html` is ignored. */
+  textOnly?: boolean;
   headers?: Record<string, string>;
 }
 
@@ -79,7 +81,7 @@ export async function sendEmail(msg: OutgoingEmail, smtp?: SmtpSettings): Promis
     from: { name: msg.from.name, address: msg.from.address },
     replyTo: msg.replyTo || undefined,
     subject: msg.subject,
-    html: msg.html,
+    html: msg.textOnly ? undefined : msg.html,
     text,
     headers: msg.headers,
   });
@@ -103,7 +105,10 @@ async function writeToOutbox(msg: OutgoingEmail, text: string): Promise<SendResu
     .filter(Boolean)
     .join("\n");
   const banner = `<pre style="background:#fef3c7;border-bottom:1px solid #f59e0b;margin:0;padding:12px;font:12px monospace;white-space:pre-wrap">DEV OUTBOX - not actually sent\n${escapeHtml(meta)}</pre>`;
-  await writeFile(file, `${banner}\n${msg.html}\n<!--\n${text}\n-->\n`, "utf8");
+  const body = msg.textOnly
+    ? `<pre style="white-space:pre-wrap;font:14px/1.5 monospace;padding:16px">${escapeHtml(text)}</pre>`
+    : msg.html;
+  await writeFile(file, `${banner}\n${body}\n<!--\n${text}\n-->\n`, "utf8");
   return { messageId: `<dev-${randomUUID()}@localhost>`, outboxPath: file };
 }
 

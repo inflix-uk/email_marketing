@@ -103,6 +103,7 @@ async function ensureIndexes(db: Db): Promise<void> {
     db.collection("campaigns").createIndexes([
       { key: { status: 1, scheduledAt: 1 } },
       { key: { updatedAt: -1 } },
+      { key: { archivedAt: 1, status: 1, updatedAt: -1 } },
     ]),
     db.collection("sends").createIndexes([
       { key: { campaignId: 1, contactId: 1 }, unique: true },

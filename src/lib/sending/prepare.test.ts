@@ -353,3 +353,32 @@ describe("A/B subject lines", () => {
     assert.equal(build(null, "A").subject, "News for Ann");
   });
 });
+
+describe("buildCampaignEmail - plain text", () => {
+  it("adds the unsubscribe link to a hand-written text version", () => {
+    const msg = buildCampaignEmail(campaign({ textBody: "Hi {{first_name}}" }), contact, SEND_ID, CTX);
+    assert.ok(msg.text?.startsWith("Hi Ann <b>&"));
+    assert.ok(msg.text?.includes(buildUnsubscribeUrl(LINKS, SEND_ID)));
+    assert.ok(msg.html.includes("<p>Hello"));
+  });
+
+  it("includes the unsubscribe URL in the automatic text when the footer is added", () => {
+    const msg = buildCampaignEmail(campaign({ html: "<body><p>Hi</p></body>" }), contact, SEND_ID, CTX);
+    assert.ok(msg.text?.includes(`Unsubscribe (${buildUnsubscribeUrl(LINKS, SEND_ID)})`));
+  });
+
+  it("plain-text-only campaigns have no HTML part, no pixel and no tracked links", () => {
+    const msg = buildCampaignEmail(
+      campaign({ format: "text", html: '<body><p>Read <a href="https://example.com/x">this</a></p></body>' }),
+      contact,
+      SEND_ID,
+      CTX,
+    );
+    assert.equal(msg.textOnly, true);
+    assert.equal(msg.html, "");
+    assert.ok(msg.text?.includes("this (https://example.com/x)"));
+    assert.ok(!msg.text?.includes("/api/t/"));
+    assert.ok(msg.text?.includes(buildUnsubscribeUrl(LINKS, SEND_ID)));
+    assert.equal(msg.headers?.["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
+  });
+});

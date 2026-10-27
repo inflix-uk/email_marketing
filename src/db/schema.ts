@@ -319,6 +319,18 @@ export interface RateLimitDoc {
   expiresAt: Date;
 }
 
+/** [reports] A saved /reports view: its name and URL query string, private to its owner. */
+export interface ReportDoc {
+  _id: string;
+  name: string;
+  /** Report settings as a query string (range, from, to, group, list, m1, m2, compare). */
+  query: string;
+  /** users._id of the person who saved it. */
+  ownerId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // ---------------------------------------------------------------------------
 // App-facing types: same fields, `id` instead of `_id`
 // ---------------------------------------------------------------------------

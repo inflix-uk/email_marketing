@@ -19,7 +19,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar userEmail={session.email} logout={logout} />
       <div className="min-w-0 flex-1">
         {devMailer ? (
-          <div className="border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs text-amber-900">
+          <div className="border-b border-amber-200 bg-amber-50 print:hidden px-6 py-2 text-xs text-amber-900">
             Email sending isn&apos;t set up yet, so no emails will go out.{" "}
             <Link href="/settings" className="font-medium underline">
               Set it up

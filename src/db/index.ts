@@ -11,6 +11,7 @@ import type {
   FormDoc,
   ListDoc,
   RateLimitDoc,
+  ReportDoc,
   SegmentDoc,
   SendDoc,
   TemplateDoc,
@@ -82,6 +83,7 @@ export async function collections() {
     enrollments: db.collection<EnrollmentDoc>("enrollments"),
     apiKeys: db.collection<ApiKeyDoc>("apiKeys"),
     rateLimits: db.collection<RateLimitDoc>("rateLimits"),
+    reports: db.collection<ReportDoc>("reports"),
   };
 }
 
@@ -122,6 +124,8 @@ async function ensureIndexes(db: Db): Promise<void> {
     db.collection("automations").createIndexes([{ key: { status: 1 } }]),
     db.collection("apiKeys").createIndexes([{ key: { keyHash: 1 }, unique: true }]),
     db.collection("rateLimits").createIndexes([{ key: { expiresAt: 1 }, expireAfterSeconds: 0 }]),
+    db.collection("reports").createIndexes([{ key: { ownerId: 1, name: 1 } }]),
+    db.collection("campaigns").createIndexes([{ key: { startedAt: -1 } }]),
   ]);
 }
 

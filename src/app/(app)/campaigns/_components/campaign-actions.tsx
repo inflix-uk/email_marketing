@@ -117,6 +117,7 @@ export function SelectAllCampaigns() {
   return (
     <input
       type="checkbox"
+      data-bulk-all=""
       aria-label="Select all on this page"
       className="relative z-10 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600"
       onChange={(e) => {
@@ -137,6 +138,7 @@ export function BulkBar({ archivedTab, folders }: { archivedTab: boolean; folder
     const result = await bulkCampaigns(prev, formData);
     if (result.ok) {
       for (const box of bulkBoxes()) box.checked = false;
+      for (const all of document.querySelectorAll<HTMLInputElement>("input[data-bulk-all]")) all.checked = false;
       setCount(0);
     }
     return result;

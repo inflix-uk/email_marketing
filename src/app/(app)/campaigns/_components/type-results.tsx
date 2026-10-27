@@ -3,11 +3,13 @@ import type { ReactNode } from "react";
 import { Badge, Card, CardBody, CardHeader, Table, TBody, Td, Th } from "@/components/ui/layout";
 import { collections } from "@/db";
 import type { Campaign, VariantContent, VariantResult } from "@/db/schema";
+import { requireSession } from "@/lib/auth";
 import { getVariantResults } from "@/lib/campaign-types";
 import { metricRate } from "@/lib/campaign-types/ab-test";
 import { describeDelay } from "@/lib/campaign-types/resend-rules";
 import { getResendReport, getTemplateNames } from "@/lib/campaign-types/reports";
 import { STARTER_TEMPLATES } from "@/lib/starter-templates";
+import { can } from "@/lib/permissions";
 import { formatNumber, formatPercent } from "@/lib/utils";
 import { pickWinner } from "../type-actions";
 import { ActionButton } from "./action-buttons";
@@ -60,7 +62,11 @@ async function VariantResults({ campaign }: { campaign: Campaign }) {
   const live = await getVariantResults(campaign.id, test);
   const templateNames = await getTemplateNames([campaign.templateId ?? "", ...test.variants.map((v) => v.templateId ?? "")]);
   const metricLabel = test.metric === "open" ? "opens" : "clicks";
-  const canPick = test.mode === "sample" && !test.winner && (campaign.status === "sending" || campaign.status === "paused");
+  const canPick =
+    test.mode === "sample" &&
+    !test.winner &&
+    (campaign.status === "sending" || campaign.status === "paused") &&
+    can((await requireSession()).role, "send");
 
   let status: ReactNode;
   if (test.mode === "split") {
@@ -71,6 +77,8 @@ async function VariantResults({ campaign }: { campaign: Campaign }) {
         Version {test.winner} won ({test.decision?.by === "manual" ? "picked by hand" : `most ${metricLabel}`}) and went to the rest.
       </>
     );
+  } else if (campaign.status === "cancelled") {
+    status = "Stopped before a winner was picked - the rest of the list wasn't sent.";
   } else if (test.state === "manual") {
     status = <strong className="font-semibold text-amber-800">Choose winner manually: no clear winner (a tie, or no {metricLabel} yet).</strong>;
   } else if (test.decideAt) {

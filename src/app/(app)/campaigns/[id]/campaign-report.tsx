@@ -5,7 +5,7 @@ import { Card, CardBody, PageHeader, StatusBadge } from "@/components/ui/layout"
 import type { Campaign } from "@/db/schema";
 import { getReportSummary } from "@/lib/reports/campaign";
 import { formatUkDateTime } from "@/lib/reports/time-buckets";
-import { cn, formatDateTime, formatNumber } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import { cancelSending, deleteCampaign, duplicateCampaign, pauseSending, resumeSending } from "../actions";
 import { ActionButton, ConfirmButton } from "../_components/action-buttons";
 import { FilterTabs } from "../_components/filter-tabs";
@@ -52,6 +52,7 @@ export async function CampaignReport({ campaign, state }: { campaign: Campaign; 
         }
         actions={
           <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <Can permission="send">
             {campaign.status === "sending" ? (
               <ActionButton action={pauseSending.bind(null, campaign.id)} pendingText="Pausing...">
                 Pause
@@ -74,12 +75,14 @@ export async function CampaignReport({ campaign, state }: { campaign: Campaign; 
                 pendingText="Stopping..."
               />
             ) : null}
+            </Can>
             <Can permission="edit">
             <ActionButton action={duplicateCampaign.bind(null, campaign.id)} pendingText="Copying...">
               Send again
             </ActionButton>
             </Can>
             <PrintButton />
+            <Can permission="delete">
             {campaign.status === "sent" || campaign.status === "cancelled" ? (
               <ConfirmButton
                 action={deleteCampaign.bind(null, campaign.id)}
@@ -91,6 +94,7 @@ export async function CampaignReport({ campaign, state }: { campaign: Campaign; 
                 pendingText="Deleting..."
               />
             ) : null}
+            </Can>
           </div>
         }
       />
@@ -182,11 +186,11 @@ function statusLine(campaign: Campaign): string {
   switch (campaign.status) {
     case "sending":
     case "paused":
-      return `Started ${formatDateTime(campaign.startedAt)}`;
+      return `Started ${formatUkDateTime(campaign.startedAt)}`;
     case "sent":
-      return `Sent ${formatDateTime(campaign.completedAt ?? campaign.startedAt)}`;
+      return `Sent ${formatUkDateTime(campaign.completedAt ?? campaign.startedAt)}`;
     case "cancelled":
-      return `Stopped ${formatDateTime(campaign.completedAt ?? campaign.updatedAt)}`;
+      return `Stopped ${formatUkDateTime(campaign.completedAt ?? campaign.updatedAt)}`;
     default:
       return "";
   }

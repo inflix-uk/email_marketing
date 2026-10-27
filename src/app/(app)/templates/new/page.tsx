@@ -1,11 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/layout";
+import { requireSession } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { StarterPicker } from "../starter-picker";
 
 export const metadata: Metadata = { title: "New template" };
 
-export default function NewTemplatePage() {
+export default async function NewTemplatePage() {
+  // Viewers can't create templates.
+  if (!can((await requireSession()).role, "edit")) redirect("/templates");
   return (
     <>
       <PageHeader

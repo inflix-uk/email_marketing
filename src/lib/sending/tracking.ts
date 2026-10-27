@@ -138,6 +138,10 @@ export async function recordClick(sendId: string, url: string, meta: HitMeta = {
   if (!flags) return;
   const bot = flags.suspectedBot;
   const noOpenYet = { $eq: [{ $ifNull: ["$openCount", 0] }, 0] };
+  // A person clicking implies a person opened. If every open so far came from
+  // a bot or Apple's privacy proxy, count one more (human) open - otherwise
+  // "Hide suspected bots" would show a clicker who never opened (CTOR > 100%).
+  const noHumanOpenYet = { $lte: [{ $subtract: [{ $ifNull: ["$openCount", 0] }, keep("$botOpenCount")] }, 0] };
   const { sends, clicks, contacts } = await collections();
   const send = await sends.findOneAndUpdate(
     { _id: sendId },
@@ -150,7 +154,9 @@ export async function recordClick(sendId: string, url: string, meta: HitMeta = {
           openedAt: firstTime("$openedAt", now),
           // The open implied by a bot click is a bot open too.
           botOpenCount: bot ? { $add: [keep("$botOpenCount"), { $cond: [noOpenYet, 1, 0] }] } : keep("$botOpenCount"),
-          openCount: { $max: [{ $ifNull: ["$openCount", 0] }, 1] },
+          openCount: bot
+            ? { $max: [{ $ifNull: ["$openCount", 0] }, 1] }
+            : { $add: [{ $ifNull: ["$openCount", 0] }, { $cond: [noHumanOpenYet, 1, 0] }] },
           lastActivityAt: now,
           updatedAt: now,
         },

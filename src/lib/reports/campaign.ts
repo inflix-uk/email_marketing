@@ -401,8 +401,14 @@ export async function getRecipientTimeline(
       events.push({ at: e.createdAt, label: "Opened", flag });
     }
   } else if (send.openedAt) {
-    // Older data: only the first open time is known.
-    events.push({ at: send.openedAt, label: "Opened", detail: "first open" });
+    // No open events: older data, or an open implied by a click (images
+    // blocked). Only the first open time is known. When every open on the
+    // send came from a bot (e.g. a scanner's click), flag it - and leave it
+    // out when bots are hidden, like the Opened filter does.
+    const botOnly = (send.botOpenCount ?? 0) > 0 && (send.openCount ?? 0) - (send.botOpenCount ?? 0) <= 0;
+    if (!(botOnly && o.hideBots)) {
+      events.push({ at: send.openedAt, label: "Opened", detail: "first open", flag: botOnly ? "Suspected bot" : undefined });
+    }
   }
   for (const e of clickDocs) {
     events.push({ at: e.createdAt, label: "Clicked a link", detail: e.url, flag: e.suspectedBot ? "Suspected bot" : undefined });

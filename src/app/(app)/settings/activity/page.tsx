@@ -22,6 +22,7 @@ const ACTION_LABELS: Record<string, string> = {
   "campaign.delete": "Deleted a campaign",
   "campaign.export": "Downloaded campaign recipients",
   "contacts.export": "Downloaded contacts",
+  "template.delete": "Deleted a template",
   "contact.delete": "Deleted a contact",
   "contact.bulk_subscribe": "Subscribed contacts",
   "contact.bulk_unsubscribe": "Unsubscribed contacts",

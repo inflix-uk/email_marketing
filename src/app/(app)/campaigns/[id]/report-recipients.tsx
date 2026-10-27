@@ -177,7 +177,7 @@ export async function ReportRecipients({
             />
           </div>
         ) : (
-          <RecipientsTable rows={result.rows} state={state} />
+          <RecipientsTable rows={result.rows} state={state} textOnly={textOnly} />
         )}
         <Pagination
           page={result.page}
@@ -202,9 +202,12 @@ function deliveryTone(label: string): "green" | "red" | "yellow" | "gray" {
 function RecipientsTable({
   rows,
   state,
+  textOnly,
 }: {
   rows: ReportRecipient[];
   state: ReportState;
+  /** Plain-text email: no open pixel and no tracked links, so N/A rather than 0. */
+  textOnly: boolean;
 }) {
   return (
     <Table>
@@ -257,10 +260,10 @@ function RecipientsTable({
               </span>
             </Td>
             <Td className="text-right tabular-nums">
-              {formatNumber(row.opens)}
+              {textOnly ? "N/A" : formatNumber(row.opens)}
             </Td>
             <Td className="text-right tabular-nums">
-              {formatNumber(row.clicks)}
+              {textOnly ? "N/A" : formatNumber(row.clicks)}
             </Td>
             <Td className="whitespace-nowrap tabular-nums">
               {formatUkDateTime(row.lastActivityAt)}

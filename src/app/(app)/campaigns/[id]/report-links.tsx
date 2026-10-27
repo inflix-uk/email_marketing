@@ -5,7 +5,7 @@ import { formatShare } from "@/lib/reports/metrics";
 import { getSettings } from "@/lib/settings";
 import { formatNumber } from "@/lib/utils";
 import { DownloadLink } from "../_components/download-link";
-import type { ReportState } from "./report-state";
+import { isTextOnly, type ReportState } from "./report-state";
 import { HelpDot, ShareBar } from "./report-ui";
 
 export async function ReportLinks({ campaign, state }: { campaign: Campaign; state: ReportState }) {
@@ -30,7 +30,7 @@ export async function ReportLinks({ campaign, state }: { campaign: Campaign; sta
       />
       {links.length === 0 ? (
         <div className="p-6">
-          <EmptyState title="No clicks yet." />
+          <EmptyState title={isTextOnly(campaign) ? "Plain-text emails can't track clicks." : "No clicks yet."} />
         </div>
       ) : (
         <Table>

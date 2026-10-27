@@ -18,7 +18,6 @@ const isSet = (field: string) => ({ $ne: [{ $ifNull: [field, null] }, null] });
 interface Row {
   _id: string;
   sent: number;
-  delivered: number;
   opens: number;
   clicks: number;
   unsubscribes: number;
@@ -34,7 +33,7 @@ export async function getCampaignCounts(range: DateRange, listId: string | null)
   if (listId) filter.listIds = listId;
 
   const docs = await campaigns
-    .find(filter, { projection: { name: 1, startedAt: 1 } })
+    .find(filter, { projection: { name: 1, startedAt: 1, format: 1 } })
     .sort({ startedAt: -1 })
     .toArray();
   if (docs.length === 0) return [];
@@ -47,11 +46,11 @@ export async function getCampaignCounts(range: DateRange, listId: string | null)
           $group: {
             _id: "$campaignId",
             sent: countIf({ $eq: ["$status", "sent"] }),
-            delivered: countIf({ $and: [{ $eq: ["$status", "sent"] }, { $not: [isSet("$bouncedAt")] }] }),
             opens: countIf(isSet("$openedAt")),
             clicks: countIf(isSet("$clickedAt")),
             unsubscribes: countIf(isSet("$unsubscribedAt")),
-            bounces: countIf(isSet("$bouncedAt")),
+            // Hard or soft, each email once - the same as the campaign report's Bounces card.
+            bounces: countIf({ $or: [isSet("$bouncedAt"), isSet("$softBouncedAt")] }),
             complaints: countIf(isSet("$complainedAt")),
           },
         },
@@ -66,7 +65,8 @@ export async function getCampaignCounts(range: DateRange, listId: string | null)
     const counts = emptyCounts();
     if (r) {
       counts.sent = r.sent;
-      counts.delivered = r.delivered;
+      // Plain-text-only emails have no open pixel or tracked links: leave them out of the rate denominators.
+      counts.tracked = d.format === "text" ? 0 : r.sent;
       counts.opens = r.opens;
       counts.clicks = r.clicks;
       counts.unsubscribes = r.unsubscribes;

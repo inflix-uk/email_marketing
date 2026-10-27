@@ -12,6 +12,8 @@
 // The child's id is derived from the series and the posts, so a crash between
 // 4 and 5 re-uses the same child instead of emailing the posts twice.
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { collections } from "@/db";
 import type { CampaignDoc } from "@/db/schema";
 import { CampaignError } from "@/lib/sending/errors";
@@ -30,6 +32,8 @@ import { deterministicId, errorMessage, insertIgnoringDuplicates } from "./store
 
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_FEED_BYTES = 5 * 1024 * 1024;
+const MAX_REDIRECTS = 5;
+const NOT_PUBLIC = "That address isn't reachable from the internet.";
 const STALE_RUN_MS = 15 * 60_000;
 /** After a feed error, try again this soon (or at the next scheduled time if sooner). */
 const ERROR_RETRY_MS = 60 * 60_000;
@@ -42,14 +46,31 @@ function isPrivateHost(hostname: string): boolean {
   const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
   if (!m) return false;
   const [a, b] = [Number(m[1]), Number(m[2])];
-  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+}
+
+/**
+ * A host name can point at a private address too (e.g. a DNS name for
+ * 127.0.0.1): resolve it and refuse when any address is private.
+ */
+async function assertPublicHost(hostname: string): Promise<void> {
+  const host = hostname.replace(/^\[|\]$/g, "");
+  if (isPrivateHost(host)) throw new FeedError(NOT_PUBLIC);
+  if (isIP(host)) return;
+  let addresses: { address: string }[];
+  try {
+    addresses = await lookup(host, { all: true, verbatim: true });
+  } catch {
+    throw new FeedError("The feed couldn't be reached.");
+  }
+  if (addresses.length === 0 || addresses.some((a) => isPrivateHost(a.address))) throw new FeedError(NOT_PUBLIC);
 }
 
 /** Check a feed address typed by a person. Returns the normalised URL or an error message. */
 export function checkFeedUrl(raw: string): { url: string } | { error: string } {
   const url = safeHttpUrl(raw);
   if (!url) return { error: "Enter the full feed address, starting with https://" };
-  if (isPrivateHost(new URL(url).hostname)) return { error: "That address isn't reachable from the internet." };
+  if (isPrivateHost(new URL(url).hostname)) return { error: NOT_PUBLIC };
   return { url };
 }
 
@@ -57,21 +78,38 @@ export function checkFeedUrl(raw: string): { url: string } | { error: string } {
 export async function fetchFeed(raw: string): Promise<ParsedFeed> {
   const checked = checkFeedUrl(raw);
   if ("error" in checked) throw new FeedError(checked.error);
+  // Redirects are followed by hand so every hop's address is checked before it is requested.
+  const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  let url = checked.url;
   let res: Response;
-  try {
-    res = await fetch(checked.url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      headers: {
-        "user-agent": "InflixMarketing-RSS/1.0",
-        accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.5",
-      },
-    });
-  } catch (err) {
-    const timedOut = (err as { name?: string })?.name === "TimeoutError";
-    throw new FeedError(timedOut ? "The feed took too long to answer." : "The feed couldn't be reached.");
+  for (let hop = 0; ; hop++) {
+    await assertPublicHost(new URL(url).hostname);
+    try {
+      res = await fetch(url, {
+        redirect: "manual",
+        signal,
+        headers: {
+          "user-agent": "InflixMarketing-RSS/1.0",
+          accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.5",
+        },
+      });
+    } catch (err) {
+      const timedOut = (err as { name?: string })?.name === "TimeoutError";
+      throw new FeedError(timedOut ? "The feed took too long to answer." : "The feed couldn't be reached.");
+    }
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (!location) break;
+    await res.body?.cancel().catch(() => {});
+    if (hop >= MAX_REDIRECTS) throw new FeedError("The feed redirects too many times.");
+    let next: string | null = null;
+    try {
+      next = safeHttpUrl(new URL(location, url).toString());
+    } catch {
+      next = null;
+    }
+    if (!next) throw new FeedError("The feed redirects to an address that can't be read.");
+    url = next;
   }
-  if (res.url && isPrivateHost(new URL(res.url).hostname)) throw new FeedError("That address isn't reachable from the internet.");
   if (!res.ok) throw new FeedError(`The feed answered with an error (HTTP ${res.status}).`);
   const length = Number(res.headers.get("content-length") ?? 0);
   if (length > MAX_FEED_BYTES) throw new FeedError("The feed is too big.");
@@ -177,6 +215,9 @@ async function runSeries(seriesId: string, now: Date): Promise<RssRunLog | null>
     html: applyRssItems(series.html, items),
     design: null,
     templateId: series.templateId,
+    // Same format as the series; the text version is generated from the html (which holds the posts).
+    format: series.format ?? "html",
+    textBody: null,
     listIds: series.listIds ?? [],
     segmentIds: series.segmentIds ?? [],
     abTest: null,

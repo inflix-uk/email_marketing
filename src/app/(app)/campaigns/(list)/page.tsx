@@ -308,42 +308,46 @@ function CampaignRow({
               Edit
             </ButtonLink>
           ) : null}
-          {row.status === "scheduled" ? (
-            <ConfirmButton
-              action={unscheduleCampaign.bind(null, row.id)}
-              label="Cancel"
-              size="sm"
-              title="Cancel the scheduled send?"
-              description="It won't go out. You'll find it in Drafts."
-              confirmLabel="Cancel send"
-              dismissLabel="Keep it"
-              pendingText="Cancelling..."
-            />
-          ) : row.status === "sending" || row.status === "paused" ? (
-            <ConfirmButton
-              action={cancelSending.bind(null, row.id)}
-              label="Cancel"
-              size="sm"
-              title="Stop sending this campaign?"
-              description="Emails already sent can't be recalled. The rest won't go out."
-              confirmLabel="Stop sending"
-              dismissLabel="Keep sending"
-              pendingText="Stopping..."
-            />
-          ) : null}
+          <Can permission="send">
+            {row.status === "scheduled" ? (
+              <ConfirmButton
+                action={unscheduleCampaign.bind(null, row.id)}
+                label="Cancel"
+                size="sm"
+                title="Cancel the scheduled send?"
+                description="It won't go out. You'll find it in Drafts."
+                confirmLabel="Cancel send"
+                dismissLabel="Keep it"
+                pendingText="Cancelling..."
+              />
+            ) : row.status === "sending" || row.status === "paused" ? (
+              <ConfirmButton
+                action={cancelSending.bind(null, row.id)}
+                label="Cancel"
+                size="sm"
+                title="Stop sending this campaign?"
+                description="Emails already sent can't be recalled. The rest won't go out."
+                confirmLabel="Stop sending"
+                dismissLabel="Keep sending"
+                pendingText="Stopping..."
+              />
+            ) : null}
+          </Can>
           {!draft ? (
             <ButtonLink href={`/campaigns/${row.id}`} variant="secondary" size="sm">
               {row.status === "sending" || row.status === "paused" ? "View" : "View report"}
             </ButtonLink>
           ) : null}
-          <CampaignMoreMenu
-            campaignId={row.id}
-            name={title || "Untitled campaign"}
-            archived={row.archived}
-            canArchive={ARCHIVABLE_STATUSES.includes(row.status)}
-            folder={row.folder}
-            folders={folders}
-          />
+          <Can permission="edit">
+            <CampaignMoreMenu
+              campaignId={row.id}
+              name={title || "Untitled campaign"}
+              archived={row.archived}
+              canArchive={ARCHIVABLE_STATUSES.includes(row.status)}
+              folder={row.folder}
+              folders={folders}
+            />
+          </Can>
         </div>
       </Td>
     </tr>

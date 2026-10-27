@@ -116,6 +116,10 @@ async function runResend(parentId: string, now: Date): Promise<ResendLog | null>
       html: settings.html?.trim() ? settings.html : claimed.html,
       design: settings.html?.trim() ? settings.design : (claimed.design ?? null),
       templateId: settings.html?.trim() ? settings.templateId : claimed.templateId,
+      // Same format as the first email; a hand-written text version only fits the same content.
+      format: claimed.format ?? "html",
+      textBody: settings.html?.trim() ? null : (claimed.textBody ?? null),
+      textBodyFor: settings.html?.trim() ? null : (claimed.textBodyFor ?? null),
       listIds: claimed.listIds ?? [],
       segmentIds: [],
       abTest: null,

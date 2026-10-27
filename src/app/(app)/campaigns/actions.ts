@@ -301,6 +301,8 @@ export async function submitCampaign(
     textBodyFor,
     ...content,
     ...typed.fields,
+    // Sending or scheduling an archived draft brings it back (otherwise it would hide in Archived, not the Outbox).
+    ...(intent === "send" || intent === "schedule" ? { archivedAt: null } : {}),
     updatedAt: now,
   };
   const { campaigns } = await collections();

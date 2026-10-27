@@ -29,8 +29,8 @@ function campaign(id: string, sentAt: string, over: Partial<ReportCounts>): Camp
 
 describe("roll-up rates", () => {
   test("rates come from summed numerators and denominators, not averaged percentages", () => {
-    const a = counts({ sent: 100, delivered: 100, opens: 50, clicks: 10 }); // 50% open
-    const b = counts({ sent: 900, delivered: 900, opens: 90, clicks: 9 }); // 10% open
+    const a = counts({ sent: 100, tracked: 100, opens: 50, clicks: 10 }); // 50% open
+    const b = counts({ sent: 900, tracked: 900, opens: 90, clicks: 9 }); // 10% open
     const total = sumCounts([a, b]);
     assert.equal(total.campaigns, 2);
     assert.equal(total.opens, 140);
@@ -41,7 +41,7 @@ describe("roll-up rates", () => {
   });
 
   test("zero denominators give null (N/A)", () => {
-    const r = ratesOf(counts({ sent: 0, delivered: 0 }));
+    const r = ratesOf(counts({ sent: 0, tracked: 0 }));
     assert.equal(r.openRate, null);
     assert.equal(r.clickRate, null);
     assert.equal(r.ctor, null);
@@ -51,13 +51,13 @@ describe("roll-up rates", () => {
   });
 
   test("CTOR is clicks / opens", () => {
-    assert.equal(ratesOf(counts({ delivered: 10, opens: 4, clicks: 1 })).ctor, 0.25);
+    assert.equal(ratesOf(counts({ tracked: 10, opens: 4, clicks: 1 })).ctor, 0.25);
   });
 });
 
 describe("compare with previous period", () => {
-  const cur = counts({ sent: 200, delivered: 200, opens: 50, clicks: 10 });
-  const prev = counts({ sent: 100, delivered: 100, opens: 20, clicks: 0 });
+  const cur = counts({ sent: 200, tracked: 200, opens: 50, clicks: 10 });
+  const prev = counts({ sent: 100, tracked: 100, opens: 20, clicks: 0 });
 
   test("rates change in percentage points", () => {
     const c = compareMetric(cur, prev, "openRate"); // 25% vs 20%
@@ -157,10 +157,10 @@ describe("grouping", () => {
     const range = { from: "2026-07-01", to: "2026-07-03" };
     const rows = groupRows(
       [
-        campaign("a", "2026-07-01T10:00:00Z", { sent: 10, delivered: 10, opens: 5 }),
+        campaign("a", "2026-07-01T10:00:00Z", { sent: 10, tracked: 10, opens: 5 }),
         // 23:30 UTC on 1 July is already 2 July in London.
-        campaign("b", "2026-07-01T23:30:00Z", { sent: 30, delivered: 30, opens: 3 }),
-        campaign("c", "2026-07-02T09:00:00Z", { sent: 60, delivered: 60, opens: 6 }),
+        campaign("b", "2026-07-01T23:30:00Z", { sent: 30, tracked: 30, opens: 3 }),
+        campaign("c", "2026-07-02T09:00:00Z", { sent: 60, tracked: 60, opens: 6 }),
       ],
       "day",
       range,

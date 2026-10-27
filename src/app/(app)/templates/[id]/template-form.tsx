@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import { EmailEditor } from "@/components/email-editor";
+import { useCan } from "@/components/role-context";
 import { SpamCheckPanel } from "@/components/spam-check-panel";
 import { Button } from "@/components/ui/button";
 import { Alert, Field, Input } from "@/components/ui/form";
@@ -37,6 +38,9 @@ export function TemplateForm({
   /** Quiet actions (duplicate, delete) shown at the end of the bottom row. */
   secondaryActions?: ReactNode;
 }) {
+  // Viewers may look but not save or send (the server actions refuse them anyway).
+  const canEdit = useCan("edit");
+  const canSend = useCan("send");
   const [saveState, saveAction, saving] = useActionState<SaveTemplateState, FormData>(saveTemplate, {});
 
   const [name, setName] = useState(template.name);
@@ -53,6 +57,7 @@ export function TemplateForm({
 
   // Ctrl/Cmd+S saves.
   useEffect(() => {
+    if (!canEdit) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
@@ -61,15 +66,15 @@ export function TemplateForm({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [canEdit]);
 
   // Warn before closing / reloading the tab with unsaved changes.
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty || !canEdit) return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [dirty]);
+  }, [dirty, canEdit]);
 
   const errors = saveState.fieldErrors ?? {};
 
@@ -99,16 +104,18 @@ export function TemplateForm({
               placeholder="What's this email about?"
             />
           </Field>
-          <div className="flex flex-wrap items-center gap-3 lg:pt-[26px]">
-            <SaveStatus saving={saving} dirty={dirty} saved={Boolean(saveState.ok)} />
-            <Button type="submit" disabled={saving} title="Save (Ctrl+S)">
-              {saving ? "Saving..." : "Save"}
-            </Button>
-            {/* Saves first, then opens a new campaign with this template. */}
-            <Button type="submit" name="then" value="campaign" variant="secondary" disabled={saving}>
-              Use in campaign
-            </Button>
-          </div>
+          {canEdit ? (
+            <div className="flex flex-wrap items-center gap-3 lg:pt-[26px]">
+              <SaveStatus saving={saving} dirty={dirty} saved={Boolean(saveState.ok)} />
+              <Button type="submit" disabled={saving} title="Save (Ctrl+S)">
+                {saving ? "Saving..." : "Save"}
+              </Button>
+              {/* Saves first, then opens a new campaign with this template. */}
+              <Button type="submit" name="then" value="campaign" variant="secondary" disabled={saving}>
+                Use in campaign
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         {saveState.error && !saving ? <Alert tone="error">{saveState.error}</Alert> : null}
@@ -125,15 +132,17 @@ export function TemplateForm({
       </form>
 
       <div className="mt-3 flex flex-wrap items-start gap-x-6 gap-y-3">
-        <TestSendDialog
-          templateId={template.id}
-          name={name}
-          subject={subject}
-          previewText={template.previewText ?? ""}
-          html={html}
-          defaultTo={testRecipient}
-          tests={tests}
-        />
+        {canSend ? (
+          <TestSendDialog
+            templateId={template.id}
+            name={name}
+            subject={subject}
+            previewText={template.previewText ?? ""}
+            html={html}
+            defaultTo={testRecipient}
+            tests={tests}
+          />
+        ) : null}
         <SpamCheckPanel
           subject={subject}
           preheader={template.previewText}

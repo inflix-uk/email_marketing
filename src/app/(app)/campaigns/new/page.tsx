@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/layout";
 import { requireSession } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { ComposeForm } from "../_components/compose-form";
 import { CampaignTypeSection } from "../_components/type-section";
 import { getComposeData } from "../_lib/compose-data";
@@ -17,6 +19,8 @@ export default async function NewCampaignPage({
   const params = await searchParams;
   const requestedTemplateId = firstParam(params.template) ?? firstParam(params.templateId);
   const [session, data] = await Promise.all([requireSession(), getComposeData(undefined, requestedTemplateId)]);
+  // Viewers can't create campaigns.
+  if (!can(session.role, "edit")) redirect("/campaigns");
   const initialDesign = data.designs.find((d) => d.value === data.initialDesign);
 
   return (

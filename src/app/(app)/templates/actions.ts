@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { collections } from "@/db";
 import { newId, type TemplateDoc } from "@/db/schema";
+import { audit } from "@/lib/audit";
 import { requirePermission } from "@/lib/auth";
 import { parseDesign, renderDesign, serializeDesign } from "@/lib/email-design";
 import { BLANK_STARTER, BLANK_VISUAL_STARTER, findStarter } from "@/lib/templates/starters";
@@ -245,11 +246,12 @@ export async function duplicateTemplate(formData: FormData): Promise<void> {
 }
 
 export async function deleteTemplate(formData: FormData): Promise<void> {
-  await requirePermission("delete");
+  const session = await requirePermission("delete");
   const id = text(formData, "id");
   if (id) {
     const { templates, campaigns, testSends } = await collections();
-    await templates.deleteOne({ _id: id });
+    const deleted = await templates.findOneAndDelete({ _id: id }, { projection: { name: 1 } });
+    if (deleted) await audit(session, "template.delete", { type: "template", id, details: { name: deleted.name } });
     // No foreign keys: unlink campaigns ourselves. They keep their own copy of the HTML.
     await campaigns.updateMany({ templateId: id }, { $set: { templateId: null } });
     await testSends.deleteMany({ templateId: id });

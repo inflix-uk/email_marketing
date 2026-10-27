@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { collections } from "@/db";
 import { audit } from "@/lib/audit";
 import {
   endSession,
@@ -96,8 +97,11 @@ export async function newInviteLink(_prev: TeamFormState, formData: FormData): P
 export async function removeTeammateAction(formData: FormData): Promise<void> {
   const session = await requirePermission("team");
   const id = String(formData.get("id") ?? "");
+  // Look the email up first: once removed, the log would only have an id nobody can read.
+  const { users } = await collections();
+  const target = id ? await users.findOne({ _id: id }, { projection: { email: 1 } }) : null;
   const error = await removeTeammate(id, session.email);
-  if (!error) await audit(session, "team.remove", { type: "user", id });
+  if (!error) await audit(session, "team.remove", { type: "user", id, details: target ? { email: target.email } : null });
   revalidatePath(TEAM_PATH);
   redirect(`${TEAM_PATH}?notice=${error ?? "removed"}`);
 }

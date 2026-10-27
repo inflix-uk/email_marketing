@@ -5,7 +5,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireSession } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { chooseVariantWinner, fetchFeed, runRssSeriesNow } from "@/lib/campaign-types";
 import { FeedError } from "@/lib/campaign-types/rss-feed";
 import { CampaignError } from "@/lib/sending";
@@ -22,7 +22,7 @@ export interface FeedPreview {
 
 /** "Check feed": fetch the feed and show its newest posts. */
 export async function previewFeed(url: string): Promise<FeedPreview> {
-  await requireSession();
+  await requirePermission("edit");
   const parsed = z.string().trim().min(1, "Enter the feed address.").max(2000).safeParse(url);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Enter the feed address." };
   try {
@@ -47,7 +47,7 @@ export async function previewFeed(url: string): Promise<FeedPreview> {
 
 /** "Pick this version" on an A/B test (bound to campaign id + version key). */
 export async function pickWinner(campaignId: string, key: string): Promise<ActionState> {
-  await requireSession();
+  await requirePermission("send");
   const id = idSchema.safeParse(campaignId);
   const k = z.string().regex(/^[A-H]$/).safeParse(key);
   if (!id.success || !k.success) return { error: "That version doesn't exist." };
@@ -64,7 +64,7 @@ export async function pickWinner(campaignId: string, key: string): Promise<Actio
 
 /** "Check feed now" on an active RSS series. */
 export async function checkSeriesNow(seriesId: string): Promise<ActionState> {
-  await requireSession();
+  await requirePermission("send");
   const id = idSchema.safeParse(seriesId);
   if (!id.success) return { error: "This series no longer exists." };
   try {

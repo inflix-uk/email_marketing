@@ -42,10 +42,10 @@ export async function ReportOverview({ campaign, state, summary }: { campaign: C
         />
         <MetricCard
           label="Clicks"
-          value={formatRate(m.clickRate)}
-          hint={`${people(summary.uniqueClicks)} · ${formatNumber(summary.totalClicks)} total`}
+          value={textOnly ? "N/A" : formatRate(m.clickRate)}
+          hint={textOnly ? "Plain-text emails can't track clicks" : `${people(summary.uniqueClicks)} · ${formatNumber(summary.totalClicks)} total`}
           help={`${METRIC_HELP.clickRate} ${METRIC_HELP.total}`}
-          href={recipientsHref(state, "clicked")}
+          href={textOnly ? undefined : recipientsHref(state, "clicked")}
         />
         <MetricCard
           label="Click-to-open"
@@ -92,7 +92,7 @@ export async function ReportOverview({ campaign, state, summary }: { campaign: C
             {activity && activity.buckets.some((b) => b.opens || b.clicks) ? (
               <ActivityChart activity={activity} />
             ) : (
-              <EmptyState title="No opens or clicks yet." />
+              <EmptyState title={textOnly ? "Plain-text emails can't track opens or clicks." : "No opens or clicks yet."} />
             )}
           </CardBody>
         </Card>
@@ -110,7 +110,7 @@ export async function ReportOverview({ campaign, state, summary }: { campaign: C
           />
           {links.length === 0 ? (
             <div className="p-6">
-              <EmptyState title="No clicks yet." />
+              <EmptyState title={textOnly ? "Plain-text emails can't track clicks." : "No clicks yet."} />
             </div>
           ) : (
             <ul className="divide-y divide-slate-100">

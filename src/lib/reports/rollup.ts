@@ -16,8 +16,8 @@ export interface ReportCounts {
   campaigns: number;
   /** Sends with status "sent". */
   sent: number;
-  /** Sent and not bounced: the denominator of open and click rates. */
-  delivered: number;
+  /** Sent from campaigns that track opens/clicks (not plain-text-only): the denominator of open and click rates. */
+  tracked: number;
   /** Unique opens (sends with openedAt). */
   opens: number;
   /** Unique clicks (sends with clickedAt). */
@@ -28,7 +28,7 @@ export interface ReportCounts {
 }
 
 export function emptyCounts(): ReportCounts {
-  return { campaigns: 0, sent: 0, delivered: 0, opens: 0, clicks: 0, unsubscribes: 0, bounces: 0, complaints: 0 };
+  return { campaigns: 0, sent: 0, tracked: 0, opens: 0, clicks: 0, unsubscribes: 0, bounces: 0, complaints: 0 };
 }
 
 export function addCounts(a: ReportCounts, b: ReportCounts): ReportCounts {
@@ -57,8 +57,8 @@ export interface ReportRates {
 
 export function ratesOf(c: ReportCounts): ReportRates {
   return {
-    openRate: rate(c.opens, c.sent),
-    clickRate: rate(c.clicks, c.sent),
+    openRate: rate(c.opens, c.tracked),
+    clickRate: rate(c.clicks, c.tracked),
     ctor: rate(c.clicks, c.opens),
   };
 }

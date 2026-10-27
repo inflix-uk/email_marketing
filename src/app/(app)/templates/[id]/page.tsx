@@ -6,6 +6,7 @@ import { SubmitButton } from "@/components/ui/button";
 import { collections } from "@/db";
 import { fromDoc } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { recentTemplateTests } from "@/lib/sending";
 import { formatDateTime } from "@/lib/utils";
 import { duplicateTemplate } from "../actions";
@@ -63,15 +64,19 @@ export default async function TemplatePage({ params }: Props) {
         testRecipient={session.email}
         tests={tests}
         secondaryActions={
-          <>
-            <form action={duplicateTemplate}>
-              <input type="hidden" name="id" value={template.id} />
-              <SubmitButton variant="ghost" pendingText="Duplicating..." title="Make a copy of the saved version">
-                Duplicate
-              </SubmitButton>
-            </form>
-            <DeleteTemplateButton id={template.id} name={template.name} variant="ghost" />
-          </>
+          can(session.role, "edit") ? (
+            <>
+              <form action={duplicateTemplate}>
+                <input type="hidden" name="id" value={template.id} />
+                <SubmitButton variant="ghost" pendingText="Duplicating..." title="Make a copy of the saved version">
+                  Duplicate
+                </SubmitButton>
+              </form>
+              {can(session.role, "delete") ? (
+                <DeleteTemplateButton id={template.id} name={template.name} variant="ghost" />
+              ) : null}
+            </>
+          ) : null
         }
       />
     </>

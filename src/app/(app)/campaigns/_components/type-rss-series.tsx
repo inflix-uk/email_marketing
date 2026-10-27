@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Can } from "@/components/role-context";
 import { Alert } from "@/components/ui/form";
 import { Badge, Card, CardBody, CardHeader, EmptyState, PageHeader, StatusBadge, Table, TBody, Td, Th } from "@/components/ui/layout";
 import type { Campaign } from "@/db/schema";
@@ -43,7 +44,7 @@ export async function RssSeriesPage({ campaign }: { campaign: Campaign }) {
           </span>
         }
         actions={
-          <>
+          <Can permission="send">
             {active ? (
               <ActionButton action={checkSeriesNow.bind(null, campaign.id)} pendingText="Checking...">
                 Check feed now
@@ -71,7 +72,7 @@ export async function RssSeriesPage({ campaign }: { campaign: Campaign }) {
                 pendingText="Stopping..."
               />
             ) : null}
-          </>
+          </Can>
         }
       />
 
@@ -100,7 +101,7 @@ export async function RssSeriesPage({ campaign }: { campaign: Campaign }) {
             </div>
             <div>
               <dt className="text-slate-500">Last checked</dt>
-              <dd className="font-medium text-slate-900">{rss.lastCheckedAt ? formatDateTime(rss.lastCheckedAt) : "Not yet"}</dd>
+              <dd className="font-medium text-slate-900">{rss.lastCheckedAt ? <LocalDateTime value={rss.lastCheckedAt.toISOString()} /> : "Not yet"}</dd>
             </div>
           </dl>
           <p className="mt-3 text-xs text-slate-500">

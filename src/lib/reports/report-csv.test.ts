@@ -41,10 +41,10 @@ describe("reportToCsv", () => {
         key: "c1",
         label: "=cmd|' /C calc'!A0",
         campaignId: "c1",
-        counts: { ...emptyCounts(), campaigns: 1, sent: 200, delivered: 200, opens: 50, clicks: 5 },
+        counts: { ...emptyCounts(), campaigns: 1, sent: 200, tracked: 200, opens: 50, clicks: 5 },
       },
     ],
-    total: { ...emptyCounts(), campaigns: 1, sent: 200, delivered: 200, opens: 50, clicks: 5 },
+    total: { ...emptyCounts(), campaigns: 1, sent: 200, tracked: 200, opens: 50, clicks: 5 },
   });
   const lines = csv.split("\r\n");
 

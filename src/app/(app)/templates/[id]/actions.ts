@@ -32,7 +32,12 @@ const sendTestSchema = z.object({
   subject: z.string().trim(),
   /** The template's stored preview text (no longer editable on the form). */
   previewText: z.string().trim(),
-  html: z.string().refine((value) => value.trim().length > 0, "Add some content before sending a test."),
+  html: z
+    .string()
+    .refine((value) => value.trim().length > 0, "Add some content before sending a test.")
+    // Form posts turn line breaks into CRLF; hash what the editor shows (LF), or
+    // every multi-line template would read "content changed since" right after a test.
+    .transform((value) => value.replace(/\r\n?/g, "\n")),
 });
 
 function text(formData: FormData, key: string): string {

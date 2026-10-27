@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { buttonClasses } from "@/components/ui/button";
+import { DownloadLink } from "../campaigns/_components/download-link";
 import { Card, CardBody, CardHeader, EmptyState, PageHeader, Table, TBody, Td, Th } from "@/components/ui/layout";
 import { collections } from "@/db";
 import { requireSession } from "@/lib/auth";
@@ -69,9 +69,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         description={`${scope} · ${dates} · UK time`}
         actions={
           <div className="flex flex-wrap items-center gap-2 print:hidden">
-            <a href={`/api/reports/export?${queryString}`} download className={buttonClasses("secondary", "sm")}>
+            <DownloadLink href={`/api/reports/export?${queryString}`}>
               Export CSV
-            </a>
+            </DownloadLink>
             <PrintButton />
           </div>
         }
@@ -212,7 +212,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                 </TBody>
               </Table>
               <p className="px-5 py-3 text-xs text-slate-500">
-                Open and click rates are out of emails sent, the same as each campaign report. CTOR = clicks ÷ opens. Test emails are not
+                Open and click rates are out of emails sent, the same as each campaign report (plain-text-only emails can&apos;t be tracked, so they are left out of rates). CTOR = clicks ÷ opens. Test emails are not
                 counted. Times are {REPORT_TIMEZONE}.
               </p>
             </Card>

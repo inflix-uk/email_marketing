@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { CampaignSkeleton } from "../_components/skeleton";
+import { RssSeriesPage } from "../_components/type-rss-series";
 import { firstParam, getCampaign, isEditable } from "../_lib/queries";
 import { displaySubject } from "../_lib/display";
 import { CampaignEditor } from "./campaign-editor";
@@ -31,6 +32,9 @@ export default async function CampaignPage({ params, searchParams }: { params: P
       </Suspense>
     );
   }
+
+  // A started RSS series shows its schedule and runs instead of a report.
+  if (campaign.type === "rss" && campaign.rss) return <RssSeriesPage campaign={campaign} />;
 
   return (
     <Suspense fallback={<CampaignSkeleton />}>

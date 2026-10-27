@@ -1,7 +1,17 @@
 import Link from "next/link";
 import { ButtonLink } from "@/components/ui/button";
 import { Input } from "@/components/ui/form";
-import { Badge, Card, CardBody, CardHeader, EmptyState, Table, TBody, Td, Th } from "@/components/ui/layout";
+import {
+  Badge,
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  Table,
+  TBody,
+  Td,
+  Th,
+} from "@/components/ui/layout";
 import type { Campaign } from "@/db/schema";
 import {
   getRecipientTimeline,
@@ -14,20 +24,39 @@ import {
 } from "@/lib/reports/campaign";
 import { formatUkDateTime } from "@/lib/reports/time-buckets";
 import { cn, formatNumber } from "@/lib/utils";
+import { Can } from "@/components/role-context";
 import { DownloadLink } from "../_components/download-link";
 import { FilterTabs } from "../_components/filter-tabs";
 import { Pagination } from "../_components/pagination";
 import { isTextOnly, reportHref, type ReportState } from "./report-state";
 
-export async function ReportRecipients({ campaign, state, summary }: { campaign: Campaign; state: ReportState; summary: ReportSummary }) {
+export async function ReportRecipients({
+  campaign,
+  state,
+  summary,
+}: {
+  campaign: Campaign;
+  state: ReportState;
+  summary: ReportSummary;
+}) {
   const options = { hideBots: state.hideBots };
   const [result, timeline] = await Promise.all([
-    getReportRecipients(campaign.id, { filter: state.filter, search: state.search, page: state.page }, options),
-    state.sendId ? getRecipientTimeline(campaign.id, state.sendId, options) : Promise.resolve(null),
+    getReportRecipients(
+      campaign.id,
+      { filter: state.filter, search: state.search, page: state.page },
+      options,
+    ),
+    state.sendId
+      ? getRecipientTimeline(campaign.id, state.sendId, options)
+      : Promise.resolve(null),
   ]);
   const textOnly = isTextOnly(campaign);
   const filters = REPORT_FILTERS.filter(
-    (f) => f === "all" || f === state.filter || (summary.filters[f] > 0 && !(textOnly && (f === "opened" || f === "not_opened"))),
+    (f) =>
+      f === "all" ||
+      f === state.filter ||
+      (summary.filters[f] > 0 &&
+        !(textOnly && (f === "opened" || f === "not_opened"))),
   );
 
   const exportQs = new URLSearchParams();
@@ -44,22 +73,41 @@ export async function ReportRecipients({ campaign, state, summary }: { campaign:
             title={timeline.email}
             description="What happened with this email (UK time)"
             actions={
-              <ButtonLink href={reportHref(state, { sendId: null })} scroll={false} variant="ghost" size="sm" className="print:hidden">
+              <ButtonLink
+                href={reportHref(state, { sendId: null })}
+                scroll={false}
+                variant="ghost"
+                size="sm"
+                className="print:hidden"
+              >
                 Close
               </ButtonLink>
             }
           />
           <CardBody>
             {timeline.events.length === 0 ? (
-              <p className="text-sm text-slate-500">Nothing yet - this email hasn&apos;t been sent.</p>
+              <p className="text-sm text-slate-500">
+                Nothing yet - this email hasn&apos;t been sent.
+              </p>
             ) : (
               <ol className="space-y-2 border-l border-slate-200 pl-4">
                 {timeline.events.map((e, i) => (
                   <li key={i} className="relative text-sm">
-                    <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-indigo-500" aria-hidden />
-                    <span className="mr-2 tabular-nums text-slate-500">{formatUkDateTime(e.at)}</span>
-                    <span className="font-medium text-slate-900">{e.label}</span>
-                    {e.detail ? <span className="ml-2 break-all text-slate-600">{e.detail}</span> : null}
+                    <span
+                      className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-indigo-500"
+                      aria-hidden
+                    />
+                    <span className="mr-2 tabular-nums text-slate-500">
+                      {formatUkDateTime(e.at)}
+                    </span>
+                    <span className="font-medium text-slate-900">
+                      {e.label}
+                    </span>
+                    {e.detail ? (
+                      <span className="ml-2 break-all text-slate-600">
+                        {e.detail}
+                      </span>
+                    ) : null}
                     {e.flag ? (
                       <span className="ml-2">
                         <Badge tone="yellow">{e.flag}</Badge>
@@ -78,10 +126,18 @@ export async function ReportRecipients({ campaign, state, summary }: { campaign:
           title="Recipients"
           actions={
             <div className="flex flex-wrap items-center gap-2 print:hidden">
-              <form action={`/campaigns/${campaign.id}`} className="flex items-center gap-2" role="search">
+              <form
+                action={`/campaigns/${campaign.id}`}
+                className="flex items-center gap-2"
+                role="search"
+              >
                 <input type="hidden" name="tab" value="recipients" />
-                {state.filter !== "all" ? <input type="hidden" name="filter" value={state.filter} /> : null}
-                {state.hideBots ? <input type="hidden" name="bots" value="hide" /> : null}
+                {state.filter !== "all" ? (
+                  <input type="hidden" name="filter" value={state.filter} />
+                ) : null}
+                {state.hideBots ? (
+                  <input type="hidden" name="bots" value="hide" />
+                ) : null}
                 <Input
                   type="search"
                   name="q"
@@ -91,7 +147,11 @@ export async function ReportRecipients({ campaign, state, summary }: { campaign:
                   className="h-8 w-56"
                 />
               </form>
-              {result.total > 0 ? <DownloadLink href={exportHref}>Export CSV</DownloadLink> : null}
+              {result.total > 0 ? (
+                <Can permission="export">
+                  <DownloadLink href={exportHref}>Export CSV</DownloadLink>
+                </Can>
+              ) : null}
             </div>
           }
         />
@@ -108,7 +168,13 @@ export async function ReportRecipients({ campaign, state, summary }: { campaign:
         />
         {result.rows.length === 0 ? (
           <div className="p-6">
-            <EmptyState title={state.search ? "Nobody matches that search." : "Nobody here yet."} />
+            <EmptyState
+              title={
+                state.search
+                  ? "Nobody matches that search."
+                  : "Nobody here yet."
+              }
+            />
           </div>
         ) : (
           <RecipientsTable rows={result.rows} state={state} />
@@ -133,7 +199,13 @@ function deliveryTone(label: string): "green" | "red" | "yellow" | "gray" {
   return "gray";
 }
 
-function RecipientsTable({ rows, state }: { rows: ReportRecipient[]; state: ReportState }) {
+function RecipientsTable({
+  rows,
+  state,
+}: {
+  rows: ReportRecipient[];
+  state: ReportState;
+}) {
   return (
     <Table>
       <thead className="bg-slate-50">
@@ -148,7 +220,10 @@ function RecipientsTable({ rows, state }: { rows: ReportRecipient[]; state: Repo
       </thead>
       <TBody>
         {rows.map((row) => (
-          <tr key={row.id} className={cn(row.id === state.sendId && "bg-indigo-50/60")}>
+          <tr
+            key={row.id}
+            className={cn(row.id === state.sendId && "bg-indigo-50/60")}
+          >
             <Td className="max-w-64">
               <Link
                 href={reportHref(state, { sendId: row.id })}
@@ -161,7 +236,10 @@ function RecipientsTable({ rows, state }: { rows: ReportRecipient[]; state: Repo
             </Td>
             <Td className="max-w-48 truncate">
               {row.name ? (
-                <Link href={`/contacts/${row.contactId}`} className="hover:text-indigo-600">
+                <Link
+                  href={`/contacts/${row.contactId}`}
+                  className="hover:text-indigo-600"
+                >
                   {row.name}
                 </Link>
               ) : (
@@ -169,15 +247,24 @@ function RecipientsTable({ rows, state }: { rows: ReportRecipient[]; state: Repo
               )}
             </Td>
             <Td>
-              <span className="inline-flex flex-wrap gap-1" title={row.lastError ?? undefined}>
+              <span
+                className="inline-flex flex-wrap gap-1"
+                title={row.lastError ?? undefined}
+              >
                 <Badge tone={deliveryTone(row.delivery)}>{row.delivery}</Badge>
                 {row.unsubscribed ? <Badge>Unsubscribed</Badge> : null}
                 {row.complained ? <Badge tone="red">Complained</Badge> : null}
               </span>
             </Td>
-            <Td className="text-right tabular-nums">{formatNumber(row.opens)}</Td>
-            <Td className="text-right tabular-nums">{formatNumber(row.clicks)}</Td>
-            <Td className="whitespace-nowrap tabular-nums">{formatUkDateTime(row.lastActivityAt)}</Td>
+            <Td className="text-right tabular-nums">
+              {formatNumber(row.opens)}
+            </Td>
+            <Td className="text-right tabular-nums">
+              {formatNumber(row.clicks)}
+            </Td>
+            <Td className="whitespace-nowrap tabular-nums">
+              {formatUkDateTime(row.lastActivityAt)}
+            </Td>
           </tr>
         ))}
       </TBody>

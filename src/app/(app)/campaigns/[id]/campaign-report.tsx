@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Can } from "@/components/role-context";
 import { Alert } from "@/components/ui/form";
 import { Card, CardBody, PageHeader, StatusBadge } from "@/components/ui/layout";
 import type { Campaign } from "@/db/schema";
@@ -8,6 +9,7 @@ import { cn, formatDateTime, formatNumber } from "@/lib/utils";
 import { cancelSending, deleteCampaign, duplicateCampaign, pauseSending, resumeSending } from "../actions";
 import { ActionButton, ConfirmButton } from "../_components/action-buttons";
 import { FilterTabs } from "../_components/filter-tabs";
+import { CampaignTypeResults } from "../_components/type-results";
 import { displaySubject } from "../_lib/display";
 import { getListNames } from "../_lib/queries";
 import { AutoRefresh } from "./auto-refresh";
@@ -72,9 +74,11 @@ export async function CampaignReport({ campaign, state }: { campaign: Campaign; 
                 pendingText="Stopping..."
               />
             ) : null}
+            <Can permission="edit">
             <ActionButton action={duplicateCampaign.bind(null, campaign.id)} pendingText="Copying...">
               Send again
             </ActionButton>
+            </Can>
             <PrintButton />
             {campaign.status === "sent" || campaign.status === "cancelled" ? (
               <ConfirmButton
@@ -164,6 +168,7 @@ export async function CampaignReport({ campaign, state }: { campaign: Campaign; 
         </div>
       </div>
 
+      {state.tab === "overview" ? <CampaignTypeResults campaign={campaign} /> : null}
       {state.tab === "overview" ? <ReportOverview campaign={campaign} state={state} summary={summary} /> : null}
       {state.tab === "recipients" ? <ReportRecipients campaign={campaign} state={state} summary={summary} /> : null}
       {state.tab === "links" ? <ReportLinks campaign={campaign} state={state} /> : null}

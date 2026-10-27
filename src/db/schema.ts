@@ -116,6 +116,114 @@ export interface AbTest {
   decidedAt: Date | null;
 }
 
+// --- Campaign types (A/B test, auto resend, RSS) - logic in src/lib/campaign-types ---
+
+/** Missing = "regular". */
+export const CAMPAIGN_TYPES = ["regular", "ab", "resend", "rss"] as const;
+export type CampaignType = (typeof CAMPAIGN_TYPES)[number];
+
+/** Variant keys of a (multivariate) A/B test, at most 8. "A" is the campaign's own content. */
+export const VARIANT_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
+export type VariantKey = (typeof VARIANT_KEYS)[number];
+
+/** One version of an A/B test email. null fields fall back to the campaign's own value. */
+export interface VariantContent {
+  key: VariantKey;
+  subject: string | null;
+  /** Design picker value ("template:<id>" / "starter:<key>"); its html is copied on save. */
+  source: string | null;
+  templateId: string | null;
+  html: string | null;
+  previewText: string | null;
+  design: string | null;
+  fromName: string | null;
+}
+
+export interface VariantResult {
+  key: VariantKey;
+  sent: number;
+  /** Unique opens / clicks. */
+  opened: number;
+  clicked: number;
+}
+
+/** Stored once when the winner is picked; later opens/clicks never change it. */
+export interface VariantDecision {
+  at: Date;
+  metric: "click" | "open";
+  results: VariantResult[];
+  by: "auto" | "manual";
+}
+
+/** Multivariate A/B test (campaign.type "ab"). */
+export interface VariantTest {
+  /** What differs between the variants. */
+  variable: "subject" | "content" | "sender" | "subject_content";
+  variants: VariantContent[];
+  /** "sample": test on samplePercent%, then the winner goes to the rest. "split": everyone gets a variant. */
+  mode: "sample" | "split";
+  /** Percent of the audience in the test (all variants together), 5-90. */
+  samplePercent: number;
+  metric: "click" | "open";
+  waitHours: number;
+  /** testing -> decided, or testing -> manual (tie / no engagement) -> decided. */
+  state: "testing" | "manual" | "decided";
+  /** When the worker evaluates the test (set when sending starts). */
+  decideAt: Date | null;
+  winner: VariantKey | null;
+  decidedAt: Date | null;
+  decision: VariantDecision | null;
+  /** Set once the held-back rest of the audience was released to the winner. */
+  remainderReleasedAt: Date | null;
+}
+
+/** Auto resend (campaign.type "resend"): a second email to people who didn't open / click the first. */
+export interface ResendSettings {
+  condition: "not_opened" | "not_clicked";
+  delayHours: number;
+  /** Optional new subject (null = same subject). */
+  subject: string | null;
+  /** Optional different design (null = same email). Its html is copied on save. */
+  source: string | null;
+  templateId: string | null;
+  html: string | null;
+  previewText: string | null;
+  design: string | null;
+  state: "waiting" | "running" | "done" | "skipped";
+  /** startedAt + delay (set when the first email starts sending). */
+  dueAt: Date | null;
+  claimedAt: Date | null;
+  /** The child campaign holding the resend emails. */
+  childId: string | null;
+  resentAt: Date | null;
+  resendCount: number;
+  note: string | null;
+}
+
+/** RSS series (campaign.type "rss"): emails new feed posts on a schedule; each run is a child campaign. */
+export interface RssSettings {
+  feedUrl: string;
+  /** Max posts per email. */
+  itemCount: number;
+  frequency: "daily" | "weekly";
+  /** 0 = Sunday ... 6 = Saturday (weekly only). */
+  weekday: number;
+  /** "HH:mm" in timeZone. */
+  time: string;
+  timeZone: string;
+  nextRunAt: Date | null;
+  /** Claim while a run is in progress. */
+  runningAt: Date | null;
+  lastCheckedAt: Date | null;
+  lastRunAt: Date | null;
+  lastError: string | null;
+  /** Ids (guid / link) of posts already emailed, newest first (capped). */
+  seenIds: string[];
+  /** Newest post date already emailed. */
+  lastItemAt: Date | null;
+  runCount: number;
+}
+
 /** [campaigns] */
 export interface CampaignDoc {
   _id: string;
@@ -135,6 +243,14 @@ export interface CampaignDoc {
   /** Visual-editor design (JSON string) the html was generated from, if any. */
   design?: string | null;
   abTest?: AbTest | null;
+  /** Missing = "regular". Chosen when the campaign is created, then locked. */
+  type?: CampaignType;
+  variantTest?: VariantTest | null;
+  resend?: ResendSettings | null;
+  rss?: RssSettings | null;
+  /** Child campaigns (an RSS run, an auto resend) point at their parent. Hidden from the campaign list. */
+  parentId?: string | null;
+  runKind?: "rss" | "resend" | null;
   /** Why the system paused this campaign (e.g. high bounce rate). Cleared on resume. */
   pauseReason?: string | null;
   /** Set when a human resumed after an automatic bounce pause, so it is not paused again straight away. */
@@ -179,8 +295,8 @@ export interface SendDoc {
   campaignId: string;
   kind?: "campaign" | "automation";
   automationId?: string | null;
-  /** A/B test variant; null/missing = not in the test group (receives the winning subject). */
-  variant?: "A" | "B" | null;
+  /** A/B test variant; null/missing = not in the test group (receives the winner). */
+  variant?: VariantKey | null;
   bouncedAt?: Date | null;
   complainedAt?: Date | null;
   contactId: string;

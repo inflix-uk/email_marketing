@@ -53,9 +53,9 @@ export function parseWorkspaceParams(params: Record<string, string | string[] | 
 
 /** Archived campaigns, or the not-archived campaigns of one tab. */
 export function tabFilter(tab: CampaignTab): Filter<CampaignDoc> {
-  if (tab === "archived") return { archivedAt: { $ne: null } };
+  if (tab === "archived") return { archivedAt: { $ne: null }, parentId: null };
   // Missing archivedAt (older documents) counts as not archived.
-  return { status: { $in: TAB_STATUSES[tab] }, archivedAt: null };
+  return { status: { $in: TAB_STATUSES[tab] }, archivedAt: null, parentId: null };
 }
 
 /** Search + folder, shared by every tab (so the tab counts match what you'd see). */

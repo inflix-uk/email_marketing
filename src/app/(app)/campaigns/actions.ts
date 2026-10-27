@@ -11,6 +11,7 @@ import { ARCHIVABLE_STATUSES, normalizeFolder } from "@/lib/campaigns/workspace"
 import { can } from "@/lib/permissions";
 import { contentFingerprint } from "@/lib/plain-text";
 import { checkSchedule } from "@/lib/schedule";
+import { parseCampaignTypeFields, runCampaignTypeIntent } from "@/lib/campaign-types/form";
 import { getSettings } from "@/lib/settings";
 import {
   CampaignError,
@@ -256,6 +257,10 @@ export async function submitCampaign(
     schedule = { at: check.at, local: check.local, timeZone: check.timeZone };
   }
 
+  // Campaign type (A/B test / auto resend / RSS) settings - see src/lib/campaign-types/form.ts.
+  const typed = await parseCampaignTypeFields(formData, existing);
+  if (!typed.ok) return { error: typed.error, fieldErrors: typed.fieldErrors };
+
   const settings = await getSettings();
   const replyTo = parsed.data.replyTo || settings.replyTo.trim() || null;
   if (intent === "send" || intent === "schedule") {
@@ -295,6 +300,7 @@ export async function submitCampaign(
     textBody: textBody || null,
     textBodyFor,
     ...content,
+    ...typed.fields,
     updatedAt: now,
   };
   const { campaigns } = await collections();
@@ -327,7 +333,9 @@ export async function submitCampaign(
   revalidateCampaigns();
 
   // --- Then the action
-  const result = await runIntent(id, intent, { testTo, schedule, wasScheduled: existing?.status === "scheduled" });
+  const result =
+    (await runCampaignTypeIntent(id, intent, schedule?.at ?? null)) ??
+    (await runIntent(id, intent, { testTo, schedule, wasScheduled: existing?.status === "scheduled" }));
   if (result.ok && (intent === "send" || intent === "schedule")) {
     await audit(session, `campaign.${intent}`, { type: "campaign", id, details: { subject, scheduledAt: intent === "schedule" ? schedule?.at ?? null : null } });
   }

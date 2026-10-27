@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/ui/layout";
 import { requireSession } from "@/lib/auth";
 import { ComposeForm } from "../_components/compose-form";
+import { CampaignTypeSection } from "../_components/type-section";
 import { getComposeData } from "../_lib/compose-data";
 import { firstParam } from "../_lib/queries";
 
@@ -43,6 +44,7 @@ export default async function NewCampaignPage({
         }}
         data={data}
         defaultTestTo={session.email}
+        typeOptions={<CampaignTypeSection designs={data.designs} />}
       />
     </>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useActionState, useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from "react";
+import { startTransition, useActionState, useEffect, useMemo, useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { EmailPreview, EmailThumbnail } from "@/components/email-editor";
 import { Button } from "@/components/ui/button";
 import { Alert, Input, Select, Textarea } from "@/components/ui/form";
@@ -49,7 +49,10 @@ export function ComposeForm({
   data,
   defaultTestTo,
   notice,
+  typeOptions,
 }: {
+  /** Campaign type section (A/B test, auto resend, RSS) - see ./type-options.tsx. */
+  typeOptions?: ReactNode;
   campaignId: string | null;
   initial: ComposeInitial;
   data: ComposeData;
@@ -399,6 +402,8 @@ export function ComposeForm({
               </div>
             </div>
           </details>
+
+          {typeOptions}
         </div>
 
         {/* Actions */}

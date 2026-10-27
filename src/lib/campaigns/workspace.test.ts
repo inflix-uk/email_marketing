@@ -21,10 +21,10 @@ describe("campaign workspace", () => {
     assert.equal(parseWorkspaceParams({ tab: ["drafts", "sent"] }).tab, "drafts");
   });
 
-  it("hides archived campaigns from the normal tabs", () => {
-    assert.deepEqual(tabFilter("drafts"), { status: { $in: ["draft"] }, archivedAt: null });
-    assert.deepEqual(tabFilter("outbox"), { status: { $in: ["scheduled", "sending", "paused"] }, archivedAt: null });
-    assert.deepEqual(tabFilter("archived"), { archivedAt: { $ne: null } });
+  it("hides archived campaigns (and RSS/resend runs) from the normal tabs", () => {
+    assert.deepEqual(tabFilter("drafts"), { status: { $in: ["draft"] }, archivedAt: null, parentId: null });
+    assert.deepEqual(tabFilter("outbox"), { status: { $in: ["scheduled", "sending", "paused"] }, archivedAt: null, parentId: null });
+    assert.deepEqual(tabFilter("archived"), { archivedAt: { $ne: null }, parentId: null });
   });
 
   it("searches name and subject with the input escaped", () => {

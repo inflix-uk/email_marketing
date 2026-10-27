@@ -2,6 +2,7 @@
 
 import { useActionState, useRef, useState } from "react";
 import { EmailPreview } from "@/components/email-editor";
+import { SpamCheckPanel } from "@/components/spam-check-panel";
 import { Button, SubmitButton } from "@/components/ui/button";
 import { Alert, Input, Textarea } from "@/components/ui/form";
 import { createTemplateFromHtml, type PasteHtmlState } from "./actions";
@@ -58,6 +59,7 @@ export function PasteHtmlCard() {
                 aria-label="Email HTML"
                 className="h-96 resize-none font-mono text-xs"
               />
+              {html.trim() ? <SpamCheckPanel html={html} /> : null}
             </div>
             <div className="overflow-hidden rounded-md ring-1 ring-slate-200">
               <EmailPreview html={html} height={436} />

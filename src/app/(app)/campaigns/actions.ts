@@ -4,16 +4,21 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { collections } from "@/db";
-import { fromDoc, newId, type CampaignDoc, type CampaignStatus } from "@/db/schema";
+import { CAMPAIGN_FORMATS, fromDoc, newId, type Campaign, type CampaignDoc, type CampaignStatus } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requirePermission, requireSession } from "@/lib/auth";
+import { ARCHIVABLE_STATUSES, normalizeFolder } from "@/lib/campaigns/workspace";
 import { can } from "@/lib/permissions";
+import { contentFingerprint } from "@/lib/plain-text";
+import { checkSchedule } from "@/lib/schedule";
 import { getSettings } from "@/lib/settings";
 import {
   CampaignError,
   cancelCampaign,
   countRecipients,
   getCampaignProblems,
+  hasLineBreak,
+  sendBlockers,
   pauseCampaign,
   queueCampaign,
   MAX_TEST_RECIPIENTS,
@@ -44,7 +49,8 @@ export interface ActionState {
   fieldErrors?: Record<string, string[] | undefined>;
 }
 
-const MAX_SCHEDULE_AHEAD_MS = 365 * 24 * 60 * 60 * 1000;
+const MAX_PREVIEW_TEXT = 250;
+const MAX_TEXT_BODY = 100_000;
 
 // --- Helpers ------------------------------------------------------------------
 
@@ -128,11 +134,32 @@ async function resolveStartingPoint(source: string) {
 const INTENTS = ["save", "test", "send", "schedule"] as const;
 type Intent = (typeof INTENTS)[number];
 
+interface ScheduleChoice {
+  at: Date;
+  local: string;
+  timeZone: string;
+}
+
 /** Shown on the campaign page after a new campaign was created (it gets its own URL). */
 export type ComposeNotice = "saved" | "test-sent" | "test-failed" | "scheduled";
 
 const composeSchema = z.object({
   subject: headerText(300, "The subject"),
+  name: headerText(200, "The campaign name"),
+  previewText: headerText(MAX_PREVIEW_TEXT, "The preview text"),
+  // Reply-to goes into a header: reject line breaks outright (header injection).
+  replyTo: z
+    .string()
+    .max(320)
+    .refine((v) => !hasLineBreak(v), "The reply-to address can't contain line breaks.")
+    .transform((v) => normalizeEmail(v))
+    .refine((v) => !v || isValidEmail(v), "Enter a valid reply-to email address."),
+  format: z.enum(CAMPAIGN_FORMATS),
+  textBody: z
+    .string()
+    .max(MAX_TEXT_BODY * 2)
+    .transform((v) => v.replace(/\r\n?/g, "\n").trim())
+    .refine((v) => v.length <= MAX_TEXT_BODY, `The plain-text version can't be longer than ${MAX_TEXT_BODY} characters.`),
   source: z.string().max(200),
   listIds: z.array(idSchema).max(500, "Choose at most 500 lists."),
 });
@@ -171,21 +198,30 @@ export async function submitCampaign(
 
   const existing = campaignId ? await findCampaign(campaignId) : undefined;
   if (campaignId && !existing) return NOT_FOUND;
+  // A second "Send" (double click, retry after a slow response) is not an error: it already went out.
+  if (existing && intent === "send" && ["sending", "paused", "sent"].includes(existing.status)) {
+    return { ok: true, message: "This campaign is already sending." };
+  }
   if (existing && !EDITABLE_STATUSES.includes(existing.status)) return notEditable(existing.status);
 
   const parsed = composeSchema.safeParse({
     subject: text(formData, "subject"),
+    name: text(formData, "name"),
+    previewText: text(formData, "previewText"),
+    replyTo: text(formData, "replyTo"),
+    format: text(formData, "format") || "html",
+    textBody: text(formData, "textBody"),
     source: text(formData, "source"),
     listIds: formData.getAll("listIds").filter((v): v is string => typeof v === "string"),
   });
   if (!parsed.success) {
     return { error: "Please fix the highlighted fields.", fieldErrors: z.flattenError(parsed.error).fieldErrors };
   }
-  const { subject, source } = parsed.data;
+  const { subject, source, previewText, format, textBody } = parsed.data;
   const listIds = await existingListIds(parsed.data.listIds);
 
   // "current" keeps the campaign's own content (e.g. a design whose template was deleted).
-  let content: Partial<Pick<CampaignDoc, "html" | "design" | "previewText" | "templateId">> = {};
+  let content: Partial<Pick<CampaignDoc, "html" | "design" | "templateId">> = {};
   if (!(existing && source === CURRENT_DESIGN)) {
     const resolved = await resolveStartingPoint(source);
     if (!resolved) {
@@ -194,10 +230,15 @@ export async function submitCampaign(
     content = {
       html: resolved.html,
       design: resolved.design,
-      previewText: resolved.previewText,
       templateId: resolved.templateId,
     };
   }
+  const html = content.html ?? existing?.html ?? "";
+
+  // A hand-written text version remembers which HTML it was written for, so
+  // the form can warn when the template changes later.
+  const textChanged = textBody !== (existing?.textBody ?? "");
+  const textBodyFor = !textBody ? null : textChanged ? contentFingerprint(html) : (existing?.textBodyFor ?? null);
 
   // Validate everything the chosen action needs before writing, so a failed
   // send doesn't leave a half-made campaign behind.
@@ -208,39 +249,51 @@ export async function submitCampaign(
     testTo = addresses.to;
   }
 
-  let when: Date | null = null;
+  let schedule: ScheduleChoice | null = null;
   if (intent === "schedule") {
-    const raw = text(formData, "scheduledAt");
-    when = raw ? new Date(raw) : null;
-    if (!when || Number.isNaN(when.getTime())) return { error: "Pick a date and time.", fieldErrors: { scheduledAt: ["Pick a date and time."] } };
-    if (when.getTime() <= Date.now()) return { error: "Pick a time in the future.", fieldErrors: { scheduledAt: ["Pick a time in the future."] } };
-    if (when.getTime() - Date.now() > MAX_SCHEDULE_AHEAD_MS) return { error: "You can schedule up to a year ahead." };
+    const check = checkSchedule(text(formData, "when"), text(formData, "timeZone"));
+    if (!check.ok) return { error: check.error, fieldErrors: { when: [check.error] } };
+    schedule = { at: check.at, local: check.local, timeZone: check.timeZone };
   }
 
   const settings = await getSettings();
+  const replyTo = parsed.data.replyTo || settings.replyTo.trim() || null;
   if (intent === "send" || intent === "schedule") {
-    if (!subject) return { error: "Add a subject.", fieldErrors: { subject: ["Add a subject."] } };
-    if (!settings.fromEmail) return { error: "Add your sender email in Settings first." };
-    if (!(content.html ?? existing?.html ?? "").trim()) return { error: "This design is empty. Pick another one." };
-    if (listIds.length === 0) return { error: "Choose who to send it to.", fieldErrors: { listIds: ["Choose at least one list."] } };
-    if ((await countRecipients(listIds)) === 0) {
-      return { error: "No one on these lists can receive email yet.", fieldErrors: { listIds: ["No subscribed contacts."] } };
+    const blockers = sendBlockers({
+      subject,
+      html,
+      format,
+      textBody,
+      fromEmail: settings.fromEmail,
+      replyTo,
+      listCount: listIds.length,
+      recipients: listIds.length ? await countRecipients(listIds) : 0,
+    });
+    if (blockers.length) {
+      const fieldErrors: Record<string, string[]> = {};
+      for (const b of blockers) (fieldErrors[b.field] ??= []).push(b.message);
+      return { error: describeProblems(blockers.map((b) => b.message)), fieldErrors };
     }
   }
 
   // --- Save
   const now = new Date();
   const fields = {
-    name: subject || "Untitled campaign",
+    // The internal name defaults to the subject.
+    name: parsed.data.name || subject || "Untitled campaign",
     subject,
+    previewText: previewText || null,
     listIds,
     // Segments and A/B tests are no longer offered; clear any left over.
     segmentIds: [],
     abTest: null,
-    // The sender always comes from Settings.
+    // The sender always comes from Settings; reply-to defaults to Settings.
     fromName: settings.fromName,
     fromEmail: settings.fromEmail,
-    replyTo: settings.replyTo || null,
+    replyTo,
+    format,
+    textBody: textBody || null,
+    textBodyFor,
     ...content,
     updatedAt: now,
   };
@@ -259,7 +312,6 @@ export async function submitCampaign(
       _id: newId(),
       html: "",
       design: null,
-      previewText: null,
       templateId: null,
       ...fields,
       status: "draft",
@@ -275,9 +327,9 @@ export async function submitCampaign(
   revalidateCampaigns();
 
   // --- Then the action
-  const result = await runIntent(id, intent, { testTo, when, wasScheduled: existing?.status === "scheduled" });
+  const result = await runIntent(id, intent, { testTo, schedule, wasScheduled: existing?.status === "scheduled" });
   if (result.ok && (intent === "send" || intent === "schedule")) {
-    await audit(session, `campaign.${intent}`, { type: "campaign", id, details: { subject, scheduledAt: when } });
+    await audit(session, `campaign.${intent}`, { type: "campaign", id, details: { subject, scheduledAt: intent === "schedule" ? schedule?.at ?? null : null } });
   }
 
   if (!existing) {
@@ -292,7 +344,7 @@ export async function submitCampaign(
 async function runIntent(
   id: string,
   intent: Intent,
-  opts: { testTo: string[]; when: Date | null; wasScheduled: boolean },
+  opts: { testTo: string[]; schedule: ScheduleChoice | null; wasScheduled: boolean },
 ): Promise<ActionState> {
   const { campaigns } = await collections();
 
@@ -308,6 +360,8 @@ async function runIntent(
           fromName: campaign.fromName,
           fromEmail: campaign.fromEmail,
           replyTo: campaign.replyTo,
+          format: campaign.format ?? "html",
+          textBody: campaign.textBody ?? null,
         },
         opts.testTo,
       );
@@ -327,10 +381,18 @@ async function runIntent(
     }
   }
 
-  if (intent === "schedule" && opts.when) {
+  if (intent === "schedule" && opts.schedule) {
     const result = await campaigns.updateOne(
       { _id: id, status: { $in: EDITABLE_STATUSES }, ...notQueueing() },
-      { $set: { status: "scheduled", scheduledAt: opts.when, updatedAt: new Date() } },
+      {
+        $set: {
+          status: "scheduled",
+          scheduledAt: opts.schedule.at,
+          scheduledLocal: opts.schedule.local,
+          scheduledTimeZone: opts.schedule.timeZone,
+          updatedAt: new Date(),
+        },
+      },
     );
     if (result.matchedCount === 0) return { error: "This campaign has already started sending." };
     revalidateCampaigns();
@@ -344,7 +406,7 @@ async function runIntent(
     if (problems.length) {
       await campaigns.updateOne(
         { _id: id, status: "scheduled", ...notQueueing() },
-        { $set: { status: "draft", scheduledAt: null, updatedAt: new Date() } },
+        { $set: { status: "draft", scheduledAt: null, scheduledLocal: null, scheduledTimeZone: null, updatedAt: new Date() } },
       );
       revalidateCampaigns();
       return { ok: true, warning: `Saved, but taken off the schedule: ${describeProblems(problems)}` };
@@ -370,7 +432,7 @@ export async function unscheduleCampaign(campaignId: string): Promise<ActionStat
   const { campaigns } = await collections();
   const result = await campaigns.updateOne(
     { _id: campaign.id, status: "scheduled", ...notQueueing() },
-    { $set: { status: "draft", scheduledAt: null, updatedAt: new Date() } },
+    { $set: { status: "draft", scheduledAt: null, scheduledLocal: null, scheduledTimeZone: null, updatedAt: new Date() } },
   );
   if (result.matchedCount === 0) {
     return { error: "This campaign is no longer scheduled - it may have started sending." };
@@ -425,15 +487,11 @@ export async function cancelSending(campaignId: string): Promise<ActionState> {
 
 // --- Duplicate / delete -------------------------------------------------------
 
-/** A fresh draft with the content and lists of an existing campaign. */
-export async function duplicateCampaign(campaignId: string): Promise<ActionState> {
-  await requirePermission("edit");
-  const source = await findCampaign(campaignId);
-  if (!source) return NOT_FOUND;
-  const now = new Date();
-  const copy: CampaignDoc = {
+/** A fresh draft with the content, settings and lists of a campaign - no schedule, sends or stats. */
+async function copyOf(source: Campaign, now: Date): Promise<CampaignDoc> {
+  return {
     _id: newId(),
-    name: source.name.slice(0, 200),
+    name: (source.name === source.subject ? source.name : `${source.name} (copy)`).slice(0, 200),
     subject: source.subject,
     previewText: source.previewText,
     fromName: source.fromName,
@@ -442,22 +500,133 @@ export async function duplicateCampaign(campaignId: string): Promise<ActionState
     html: source.html,
     design: source.design ?? null,
     templateId: source.templateId,
+    format: source.format ?? "html",
+    textBody: source.textBody ?? null,
+    textBodyFor: source.textBodyFor ?? null,
+    folder: source.folder ?? null,
+    archivedAt: null,
     listIds: await existingListIds(source.listIds ?? []),
     segmentIds: [],
     abTest: null,
     status: "draft",
     scheduledAt: null,
+    scheduledLocal: null,
+    scheduledTimeZone: null,
     startedAt: null,
     completedAt: null,
     totalRecipients: 0,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export async function duplicateCampaign(campaignId: string): Promise<ActionState> {
+  await requirePermission("edit");
+  const source = await findCampaign(campaignId);
+  if (!source) return NOT_FOUND;
+  const copy = await copyOf(source, new Date());
   const { campaigns } = await collections();
   await campaigns.insertOne(copy);
 
   revalidateCampaigns();
   redirect(`/campaigns/${copy._id}`);
+}
+
+// --- Archive / folders (single and bulk) ------------------------------------------
+
+/** Archived campaigns leave the normal tabs; nothing else changes (stats and history stay). */
+export async function archiveCampaign(campaignId: string): Promise<ActionState> {
+  await requirePermission("edit");
+  const id = idSchema.safeParse(campaignId);
+  if (!id.success) return NOT_FOUND;
+  const { campaigns } = await collections();
+  const now = new Date();
+  const result = await campaigns.updateOne(
+    { _id: id.data, status: { $in: ARCHIVABLE_STATUSES } },
+    { $set: { archivedAt: now, updatedAt: now } },
+  );
+  if (result.matchedCount === 0) return { error: "Only drafts and finished campaigns can be archived." };
+  revalidateCampaigns();
+  return { ok: true, message: "Archived." };
+}
+
+export async function restoreCampaign(campaignId: string): Promise<ActionState> {
+  await requirePermission("edit");
+  const id = idSchema.safeParse(campaignId);
+  if (!id.success) return NOT_FOUND;
+  const { campaigns } = await collections();
+  const result = await campaigns.updateOne({ _id: id.data }, { $set: { archivedAt: null, updatedAt: new Date() } });
+  if (result.matchedCount === 0) return NOT_FOUND;
+  revalidateCampaigns();
+  return { ok: true, message: "Restored." };
+}
+
+/** Put a campaign in a folder (an empty name takes it out of its folder). */
+export async function moveCampaign(campaignId: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("edit");
+  const id = idSchema.safeParse(campaignId);
+  if (!id.success) return NOT_FOUND;
+  const folder = normalizeFolder(text(formData, "folder"));
+  const { campaigns } = await collections();
+  const result = await campaigns.updateOne({ _id: id.data }, { $set: { folder: folder || null, updatedAt: new Date() } });
+  if (result.matchedCount === 0) return NOT_FOUND;
+  revalidateCampaigns();
+  return { ok: true, message: folder ? `Moved to ${folder}.` : "Removed from its folder." };
+}
+
+const MAX_BULK = 100;
+const bulkSchema = z.object({
+  intent: z.enum(["duplicate", "archive", "restore", "move"]),
+  ids: z.array(idSchema).min(1, "Select at least one campaign.").max(MAX_BULK, `Select at most ${MAX_BULK} campaigns.`),
+  folder: z.string().max(200),
+});
+
+/** Bulk actions for the campaigns selected on the list page. */
+export async function bulkCampaigns(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requirePermission("edit");
+  const parsed = bulkSchema.safeParse({
+    intent: text(formData, "intent"),
+    ids: [...new Set(formData.getAll("ids").filter((v): v is string => typeof v === "string"))],
+    folder: text(formData, "folder"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Select at least one campaign." };
+  const { intent, ids } = parsed.data;
+  const { campaigns } = await collections();
+  const now = new Date();
+  const plural = (n: number) => `${formatNumber(n)} ${n === 1 ? "campaign" : "campaigns"}`;
+
+  if (intent === "duplicate") {
+    const sources = (await campaigns.find({ _id: { $in: ids } }).toArray()).map(fromDoc);
+    if (sources.length === 0) return { error: "Those campaigns no longer exist." };
+    const copies = await Promise.all(sources.map((source) => copyOf(source, now)));
+    await campaigns.insertMany(copies);
+    revalidateCampaigns();
+    return { ok: true, message: `Duplicated ${plural(copies.length)}. The copies are in Drafts.` };
+  }
+  if (intent === "archive") {
+    const result = await campaigns.updateMany(
+      { _id: { $in: ids }, status: { $in: ARCHIVABLE_STATUSES } },
+      { $set: { archivedAt: now, updatedAt: now } },
+    );
+    revalidateCampaigns();
+    const skipped = ids.length - result.matchedCount;
+    return {
+      ok: true,
+      message: `Archived ${plural(result.matchedCount)}.${skipped ? ` ${plural(skipped)} in the outbox ${skipped === 1 ? "was" : "were"} skipped.` : ""}`,
+    };
+  }
+  if (intent === "restore") {
+    const result = await campaigns.updateMany({ _id: { $in: ids } }, { $set: { archivedAt: null, updatedAt: now } });
+    revalidateCampaigns();
+    return { ok: true, message: `Restored ${plural(result.matchedCount)}.` };
+  }
+  const folder = normalizeFolder(parsed.data.folder);
+  const result = await campaigns.updateMany({ _id: { $in: ids } }, { $set: { folder: folder || null, updatedAt: now } });
+  revalidateCampaigns();
+  return {
+    ok: true,
+    message: folder ? `Moved ${plural(result.matchedCount)} to ${folder}.` : `Removed ${plural(result.matchedCount)} from their folder.`,
+  };
 }
 
 export async function deleteCampaign(campaignId: string): Promise<ActionState> {

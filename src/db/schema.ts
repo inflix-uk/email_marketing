@@ -14,6 +14,9 @@ export type ContactStatus = (typeof CONTACT_STATUSES)[number];
 export const CAMPAIGN_STATUSES = ["draft", "scheduled", "sending", "paused", "sent", "cancelled"] as const;
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
 
+export const CAMPAIGN_FORMATS = ["html", "text"] as const;
+export type CampaignFormat = (typeof CAMPAIGN_FORMATS)[number];
+
 export const SEND_STATUSES = ["queued", "sending", "sent", "failed", "skipped"] as const;
 export type SendStatus = (typeof SEND_STATUSES)[number];
 
@@ -136,8 +139,26 @@ export interface CampaignDoc {
   pauseReason?: string | null;
   /** Set when a human resumed after an automatic bounce pause, so it is not paused again straight away. */
   bouncePauseIgnored?: boolean;
+  /**
+   * "html" (default when missing): HTML plus an automatic plain-text part.
+   * "text": plain text only - no HTML part, no open pixel, so reports show opens as N/A.
+   */
+  format?: CampaignFormat;
+  /** Hand-written plain-text version (merge tags allowed). null/missing = generated from the HTML. */
+  textBody?: string | null;
+  /** contentFingerprint() of the HTML when textBody was last edited - tells us the text is out of date. */
+  textBodyFor?: string | null;
+  /** Hidden from the normal campaign tabs; shown under "Archived". History is kept. */
+  archivedAt?: Date | null;
+  /** Free-text folder name for organising campaigns (null/missing = no folder). */
+  folder?: string | null;
   status: CampaignStatus;
+  /** UTC instant the worker sends at (derived from scheduledLocal + scheduledTimeZone). */
   scheduledAt: Date | null;
+  /** Wall-clock send time as picked, "YYYY-MM-DDTHH:mm". */
+  scheduledLocal?: string | null;
+  /** IANA timezone of scheduledLocal, e.g. "Europe/London". */
+  scheduledTimeZone?: string | null;
   startedAt: Date | null;
   completedAt: Date | null;
   /** Number of sends created when the campaign was queued. */

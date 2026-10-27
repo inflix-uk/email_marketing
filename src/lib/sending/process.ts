@@ -334,7 +334,7 @@ export async function processBatch(opts: ProcessBatchOptions = {}): Promise<Batc
   if (opts.campaignIds) campaignFilter._id = { $in: opts.campaignIds };
   const active = await campaigns
     .find(campaignFilter, {
-      projection: { _id: 1, subject: 1, previewText: 1, html: 1, fromName: 1, fromEmail: 1, replyTo: 1, abTest: 1 },
+      projection: { _id: 1, subject: 1, previewText: 1, html: 1, fromName: 1, fromEmail: 1, replyTo: 1, abTest: 1, format: 1, textBody: 1 },
     })
     .toArray();
   if (active.length === 0) return result;
@@ -349,6 +349,8 @@ export async function processBatch(opts: ProcessBatchOptions = {}): Promise<Batc
         fromName: c.fromName,
         fromEmail: c.fromEmail,
         replyTo: c.replyTo,
+        format: c.format ?? "html",
+        textBody: c.textBody ?? null,
         abTest: c.abTest ?? null,
       },
     ]),

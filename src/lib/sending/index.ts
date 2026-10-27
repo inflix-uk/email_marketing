@@ -18,6 +18,7 @@ export {
   QUEUE_LOCK_STALE_MS,
 } from "./queue";
 export { sendTestEmail, MAX_TEST_RECIPIENTS } from "./test-send";
+export { sendBlockers, hasLineBreak, type SendBlocker, type SendCheckInput } from "./blockers";
 export {
   sendTemplateTestEmails,
   recentTemplateTests,

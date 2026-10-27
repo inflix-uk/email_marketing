@@ -16,7 +16,7 @@ export default async function NewCampaignPage({
   const params = await searchParams;
   const requestedTemplateId = firstParam(params.template) ?? firstParam(params.templateId);
   const [session, data] = await Promise.all([requireSession(), getComposeData(undefined, requestedTemplateId)]);
-  const initialSubject = data.designs.find((d) => d.value === data.initialDesign)?.subject ?? "";
+  const initialDesign = data.designs.find((d) => d.value === data.initialDesign);
 
   return (
     <>
@@ -30,8 +30,17 @@ export default async function NewCampaignPage({
       />
       <ComposeForm
         campaignId={null}
-        initialSubject={initialSubject}
-        scheduledAt={null}
+        initial={{
+          subject: initialDesign?.subject ?? "",
+          name: "",
+          previewText: initialDesign?.previewText ?? "",
+          replyTo: "",
+          format: "html",
+          textBody: "",
+          textBodyFor: null,
+          scheduledLocal: null,
+          scheduledTimeZone: null,
+        }}
         data={data}
         defaultTestTo={session.email}
       />

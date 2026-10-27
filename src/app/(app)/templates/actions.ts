@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { collections } from "@/db";
 import { newId, type TemplateDoc } from "@/db/schema";
-import { requireSession } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { parseDesign, renderDesign, serializeDesign } from "@/lib/email-design";
 import { BLANK_STARTER, BLANK_VISUAL_STARTER, findStarter } from "@/lib/templates/starters";
 
@@ -57,7 +57,7 @@ function templatePaths(id?: string) {
 // ---------------------------------------------------------------------------
 
 export async function createTemplate(formData: FormData): Promise<void> {
-  await requireSession();
+  await requirePermission("edit");
   const starter = findStarter(text(formData, "starter"));
   if (!starter) redirect("/templates/new");
 
@@ -102,7 +102,7 @@ function htmlTitle(html: string): string {
 
 /** Pasted HTML becomes a template in the HTML editor; sending adds an unsubscribe footer if it has none. */
 export async function createTemplateFromHtml(_prev: PasteHtmlState, formData: FormData): Promise<PasteHtmlState> {
-  await requireSession();
+  await requirePermission("edit");
   const html = htmlSchema.safeParse(text(formData, "html"));
   if (!html.success) return { error: html.error.issues[0]?.message ?? "Paste the email HTML first." };
   if (!/<[a-z][\s\S]*>/i.test(html.data)) return { error: "That doesn't look like HTML. Paste the full email code." };
@@ -158,7 +158,7 @@ const saveSchema = z.object({
  * `then=campaign` button, continues to a new campaign using it.
  */
 export async function saveTemplate(_prev: SaveTemplateState, formData: FormData): Promise<SaveTemplateState> {
-  await requireSession();
+  await requirePermission("edit");
   const parsed = saveSchema.safeParse({
     id: text(formData, "id"),
     name: text(formData, "name"),
@@ -220,7 +220,7 @@ export async function saveTemplate(_prev: SaveTemplateState, formData: FormData)
 // ---------------------------------------------------------------------------
 
 export async function duplicateTemplate(formData: FormData): Promise<void> {
-  await requireSession();
+  await requirePermission("edit");
   const id = text(formData, "id");
   const { templates } = await collections();
   const original = id ? await templates.findOne({ _id: id }) : null;
@@ -245,7 +245,7 @@ export async function duplicateTemplate(formData: FormData): Promise<void> {
 }
 
 export async function deleteTemplate(formData: FormData): Promise<void> {
-  await requireSession();
+  await requirePermission("delete");
   const id = text(formData, "id");
   if (id) {
     const { templates, campaigns, testSends } = await collections();

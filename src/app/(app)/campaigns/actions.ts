@@ -5,7 +5,9 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { collections } from "@/db";
 import { fromDoc, newId, type CampaignDoc, type CampaignStatus } from "@/db/schema";
-import { requireSession } from "@/lib/auth";
+import { audit } from "@/lib/audit";
+import { requirePermission, requireSession } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { getSettings } from "@/lib/settings";
 import {
   CampaignError,
@@ -163,8 +165,9 @@ export async function submitCampaign(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const session = await requireSession();
+  const session = await requirePermission("edit");
   const intent: Intent = INTENTS.find((i) => i === text(formData, "intent")) ?? "save";
+  if (intent !== "save" && !can(session.role, "send")) return { error: "Your role can't send campaigns." };
 
   const existing = campaignId ? await findCampaign(campaignId) : undefined;
   if (campaignId && !existing) return NOT_FOUND;
@@ -273,6 +276,9 @@ export async function submitCampaign(
 
   // --- Then the action
   const result = await runIntent(id, intent, { testTo, when, wasScheduled: existing?.status === "scheduled" });
+  if (result.ok && (intent === "send" || intent === "schedule")) {
+    await audit(session, `campaign.${intent}`, { type: "campaign", id, details: { subject, scheduledAt: when } });
+  }
 
   if (!existing) {
     // A new campaign now has its own page; carry the outcome over.
@@ -357,7 +363,7 @@ export async function estimateRecipients(listIds: string[]): Promise<number> {
 }
 
 export async function unscheduleCampaign(campaignId: string): Promise<ActionState> {
-  await requireSession();
+  const session = await requirePermission("send");
   const campaign = await findCampaign(campaignId);
   if (!campaign) return NOT_FOUND;
 
@@ -369,6 +375,7 @@ export async function unscheduleCampaign(campaignId: string): Promise<ActionStat
   if (result.matchedCount === 0) {
     return { error: "This campaign is no longer scheduled - it may have started sending." };
   }
+  await audit(session, "campaign.unschedule", { type: "campaign", id: campaign.id, details: { subject: campaign.subject } });
 
   revalidateCampaigns();
   return { ok: true, message: "Unscheduled. It's a draft again." };
@@ -383,7 +390,7 @@ async function transition(
   run: (id: string) => Promise<void>,
   message: string,
 ): Promise<ActionState> {
-  await requireSession();
+  const session = await requirePermission("send");
   const campaign = await findCampaign(campaignId);
   if (!campaign) return NOT_FOUND;
   if (!allowed.includes(campaign.status)) {
@@ -394,6 +401,12 @@ async function transition(
   } catch (err) {
     return failure(err);
   }
+  const auditVerbs: Record<string, string> = { paused: "pause", resumed: "resume", cancelled: "cancel" };
+  await audit(session, `campaign.${auditVerbs[verb] ?? verb}`, {
+    type: "campaign",
+    id: campaign.id,
+    details: { subject: campaign.subject },
+  });
   revalidateCampaigns();
   return { ok: true, message };
 }
@@ -414,7 +427,7 @@ export async function cancelSending(campaignId: string): Promise<ActionState> {
 
 /** A fresh draft with the content and lists of an existing campaign. */
 export async function duplicateCampaign(campaignId: string): Promise<ActionState> {
-  await requireSession();
+  await requirePermission("edit");
   const source = await findCampaign(campaignId);
   if (!source) return NOT_FOUND;
   const now = new Date();
@@ -448,7 +461,7 @@ export async function duplicateCampaign(campaignId: string): Promise<ActionState
 }
 
 export async function deleteCampaign(campaignId: string): Promise<ActionState> {
-  await requireSession();
+  const session = await requirePermission("delete");
   const campaign = await findCampaign(campaignId);
   if (!campaign) return NOT_FOUND;
   // Drafts and finished campaigns can go; anything scheduled or sending must be stopped first.
@@ -462,6 +475,7 @@ export async function deleteCampaign(campaignId: string): Promise<ActionState> {
   if (result.deletedCount === 0) return { error: "This campaign can't be deleted right now." };
   // Its sends and clicks (the stats) go with it. Contacts, and their unsubscribes, are untouched.
   await Promise.all([sends.deleteMany({ campaignId: campaign.id }), clicks.deleteMany({ campaignId: campaign.id })]);
+  await audit(session, "campaign.delete", { type: "campaign", id: campaign.id, details: { subject: campaign.subject, status: campaign.status } });
 
   revalidateCampaigns();
   redirect("/campaigns");

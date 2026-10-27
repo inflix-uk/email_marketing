@@ -1,6 +1,6 @@
 "use server";
 
-import { requireSession } from "@/lib/auth";
+import { requirePermission, requireSession } from "@/lib/auth";
 import { IMAGE_EMPTY_ERROR, IMAGE_SIZE_ERROR, MAX_IMAGE_BYTES } from "@/lib/files/image-type";
 import { deleteImage, imagePath, imageUrl, listRecentImages, saveImage, type StoredImage } from "@/lib/files/uploads";
 import { getSettings } from "@/lib/settings";
@@ -33,7 +33,7 @@ function toEditorImage(image: StoredImage, appUrl: string): EditorImage {
 
 /** Store the image in the form field "file". PNG, JPEG, GIF or WebP, up to 2 MB. */
 export async function uploadEditorImage(formData: FormData): Promise<UploadImageResult> {
-  const session = await requireSession();
+  const session = await requirePermission("edit");
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) return { ok: false, error: IMAGE_EMPTY_ERROR };
@@ -60,7 +60,7 @@ export async function listEditorImages(): Promise<EditorImage[]> {
 
 /** Delete an upload. Emails that already use it will show a broken image. */
 export async function deleteEditorImage(id: string): Promise<{ ok: boolean }> {
-  await requireSession();
+  await requirePermission("delete");
   if (typeof id !== "string") return { ok: false };
   return { ok: await deleteImage(id) };
 }

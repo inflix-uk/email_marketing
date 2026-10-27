@@ -11,7 +11,7 @@ import {
   type AutomationStep,
   type AutomationTrigger,
 } from "@/db/schema";
-import { requireSession } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import {
   DELAY_UNITS,
   MAX_DELAY_MINUTES,
@@ -121,7 +121,7 @@ export async function saveAutomation(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  await requireSession();
+  await requirePermission("edit");
 
   const { automations, lists, forms } = await collections();
   let current: Pick<AutomationDoc, "_id" | "status" | "steps"> | null = null;
@@ -300,7 +300,7 @@ export async function saveAutomation(
 
 /** Stop sending. People already in the series keep their place and continue when it is resumed. */
 export async function pauseAutomation(automationId: string): Promise<ActionState> {
-  await requireSession();
+  await requirePermission("edit");
   const id = idSchema.safeParse(automationId);
   if (!id.success) return NOT_FOUND;
 
@@ -319,7 +319,7 @@ export async function pauseAutomation(automationId: string): Promise<ActionState
 
 /** Delete an automation and everyone's place in it. Emails already sent keep their unsubscribe links and stats. */
 export async function deleteAutomation(automationId: string): Promise<ActionState> {
-  await requireSession();
+  await requirePermission("delete");
   const id = idSchema.safeParse(automationId);
   if (!id.success) return NOT_FOUND;
 

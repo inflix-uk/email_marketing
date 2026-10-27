@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Can } from "@/components/role-context";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, EmptyState, PageHeader, StatusBadge, Table, TBody, Td, Th } from "@/components/ui/layout";
 import { collections } from "@/db";
@@ -33,7 +34,11 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Pr
   const { campaigns, contacts } = await collections();
   const total = await campaigns.countDocuments({});
 
-  const newButton = <ButtonLink href="/campaigns/new">New campaign</ButtonLink>;
+  const newButton = (
+    <Can permission="edit">
+      <ButtonLink href="/campaigns/new">New campaign</ButtonLink>
+    </Can>
+  );
   const header = <PageHeader title="Campaigns" actions={newButton} />;
 
   if (total === 0) {

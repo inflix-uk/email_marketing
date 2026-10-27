@@ -3,6 +3,7 @@ import { getMongoUri } from "@/lib/config";
 import type { SettingsDoc } from "@/lib/settings";
 import type {
   ApiKeyDoc,
+  AuditLogDoc,
   AutomationDoc,
   CampaignDoc,
   ClickDoc,
@@ -86,6 +87,7 @@ export async function collections() {
     apiKeys: db.collection<ApiKeyDoc>("apiKeys"),
     rateLimits: db.collection<RateLimitDoc>("rateLimits"),
     reports: db.collection<ReportDoc>("reports"),
+    auditLog: db.collection<AuditLogDoc>("audit_log"),
   };
 }
 
@@ -129,6 +131,7 @@ async function ensureIndexes(db: Db): Promise<void> {
     db.collection("rateLimits").createIndexes([{ key: { expiresAt: 1 }, expireAfterSeconds: 0 }]),
     db.collection("reports").createIndexes([{ key: { ownerId: 1, name: 1 } }]),
     db.collection("campaigns").createIndexes([{ key: { startedAt: -1 } }]),
+    db.collection("audit_log").createIndexes([{ key: { createdAt: -1 } }]),
   ]);
 }
 

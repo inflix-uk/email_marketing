@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { collections } from "@/db";
-import { requireSession } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { sendTemplateTestEmails } from "@/lib/sending";
 import { getSettings, isDevMailer } from "@/lib/settings";
 import { parseTestRecipients, testSender } from "@/lib/templates/recipients";
@@ -45,7 +45,7 @@ function text(formData: FormData, key: string): string {
  * and logs each one in test_sends. No campaign, no stats.
  */
 export async function sendTemplateTest(_prev: SendTestState, formData: FormData): Promise<SendTestState> {
-  await requireSession();
+  await requirePermission("send");
   const parsed = sendTestSchema.safeParse({
     id: text(formData, "id"),
     to: text(formData, "to"),

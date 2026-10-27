@@ -1,3 +1,4 @@
+import type { Role } from "@/lib/permissions";
 // MongoDB document shapes. Every document uses a string UUID as `_id`
 // (newId()), so ids in URLs and forms are plain strings. Data-access code
 // returns app objects with `id` instead of `_id` (see fromDoc).
@@ -197,10 +198,29 @@ export interface UserDoc {
   name?: string | null;
   /** Bumped to sign out every session of this user (password change, "sign out everywhere"). */
   sessionVersion?: number;
+  /** "admin" | "editor" | "viewer" (lib/permissions.ts). Missing on older accounts = admin. */
+  role?: Role | null;
   resetTokenHash?: string | null;
   resetTokenExpiresAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+// --- Activity log -----------------------------------------------------------
+
+/** One entry in the activity log (Settings > Activity log). Never holds secrets. */
+export interface AuditLogDoc {
+  _id: string;
+  /** The user's id, or null for system actions (worker, scripts). */
+  actorId: string | null;
+  actorEmail: string | null;
+  /** e.g. "campaign.send", "settings.sender", "team.role". */
+  action: string;
+  /** e.g. "campaign", "contact", "settings", "user". */
+  objectType: string;
+  objectId: string | null;
+  details: Record<string, unknown> | null;
+  createdAt: Date;
 }
 
 // --- Segments ---------------------------------------------------------------

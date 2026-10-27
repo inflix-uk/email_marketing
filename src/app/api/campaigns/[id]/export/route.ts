@@ -1,7 +1,8 @@
 import Papa from "papaparse";
 import { collections } from "@/db";
 import type { SendDoc } from "@/db/schema";
-import { getSession } from "@/lib/auth";
+import { audit } from "@/lib/audit";
+import { authorizeRequest } from "@/lib/auth";
 
 /** Recipients written to the response per chunk. */
 const BATCH_SIZE = 1000;
@@ -63,9 +64,9 @@ function fileName(campaignName: string, now = new Date()): string {
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   // proxy.ts already blocks anonymous /api/* requests; check again here anyway.
-  if (!(await getSession())) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // Recipient data: viewers can't download it.
+  const auth = await authorizeRequest("export");
+  if ("response" in auth) return auth.response;
 
   const { id } = await params;
   const { campaigns, sends } = await collections();
@@ -73,6 +74,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (!campaign) {
     return Response.json({ error: "Campaign not found" }, { status: 404 });
   }
+  await audit(auth.session, "campaign.export", { type: "campaign", id: campaign._id, details: { name: campaign.name } });
 
   // Ordered by the unique (campaignId, contactId) index: stable, and no in-memory sort.
   const cursor = sends

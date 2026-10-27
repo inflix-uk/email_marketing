@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { EmailThumbnail } from "@/components/email-editor";
+import { Can } from "@/components/role-context";
 import { ButtonLink } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/layout";
 import { collections } from "@/db";
@@ -31,7 +32,11 @@ export default async function TemplatesPage() {
 
   return (
     <>
-      <PageHeader title="Templates" actions={<ButtonLink href="/templates/new">New template</ButtonLink>} />
+      <PageHeader title="Templates" actions={
+          <Can permission="edit">
+            <ButtonLink href="/templates/new">New template</ButtonLink>
+          </Can>
+        } />
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         {rows.map((template) => (
           <li key={template.id}>

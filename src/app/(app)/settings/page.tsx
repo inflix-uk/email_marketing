@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Badge, Card, CardBody, CardHeader, PageHeader } from "@/components/ui/layout";
 import { collections } from "@/db";
 import { listTeam, requireSession } from "@/lib/auth";
+import { can, ROLE_LABELS } from "@/lib/permissions";
 import { getSettings, isDevMailer } from "@/lib/settings";
 import { AccountForm, EmailSendingForm, SenderForm } from "./forms";
 
@@ -46,60 +47,76 @@ export default async function SettingsPage() {
   const suggest = Boolean(origin) && (!storedUrl || (LOCAL_URL.test(storedUrl) && !LOCAL_URL.test(origin)));
   const appUrl = suggest ? origin : storedUrl || settings.appUrl;
 
+  // Editors and viewers only see their own account and the team.
+  const canEditSettings = can(session.role, "settings");
+
   return (
     <>
-      <PageHeader title="Settings" />
+      <PageHeader
+        title="Settings"
+        actions={
+          can(session.role, "audit") ? (
+            <Link href="/settings/activity" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+              Activity log
+            </Link>
+          ) : undefined
+        }
+      />
 
       <div className="grid items-start gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader
-            title="Email sending"
-            description={
-              notSetUp ? (
-                <>
-                  <Dot className="bg-amber-500" />
-                  Not set up yet - emails won&apos;t be sent until you add your email provider.
-                </>
-              ) : (
-                <>
-                  <Dot className="bg-emerald-500" />
-                  Sending through <span className="font-medium text-slate-700">{smtp.host}</span>
-                </>
-              )
-            }
-          />
-          <CardBody>
-            <EmailSendingForm
-              initial={{
-                host: smtp.host,
-                port: smtp.port,
-                secure: smtp.secure,
-                user: smtp.user,
-                // Only whether one is saved - the password itself stays on the server.
-                hasPassword: Boolean(smtp.host && smtp.pass),
-              }}
-              testTo={/@example\.(com|org|net)$/i.test(session.email) ? "" : session.email}
-            />
-          </CardBody>
-        </Card>
+        {canEditSettings ? (
+          <>
+            <Card>
+              <CardHeader
+                title="Email sending"
+                description={
+                  notSetUp ? (
+                    <>
+                      <Dot className="bg-amber-500" />
+                      Not set up yet - emails won&apos;t be sent until you add your email provider.
+                    </>
+                  ) : (
+                    <>
+                      <Dot className="bg-emerald-500" />
+                      Sending through <span className="font-medium text-slate-700">{smtp.host}</span>
+                    </>
+                  )
+                }
+              />
+              <CardBody>
+                <EmailSendingForm
+                  initial={{
+                    host: smtp.host,
+                    port: smtp.port,
+                    secure: smtp.secure,
+                    user: smtp.user,
+                    // Only whether one is saved - the password itself stays on the server.
+                    hasPassword: Boolean(smtp.host && smtp.pass),
+                  }}
+                  testTo={/@example\.(com|org|net)$/i.test(session.email) ? "" : session.email}
+                />
+              </CardBody>
+            </Card>
+
+            <Card>
+              <CardHeader title="Sender" />
+              <CardBody>
+                <SenderForm
+                  initial={{
+                    fromName: settings.fromName,
+                    fromEmail: settings.fromEmail,
+                    companyAddress: settings.companyAddress,
+                    appUrl,
+                  }}
+                  appUrlSaved={!suggest}
+                />
+              </CardBody>
+            </Card>
+          </>
+        ) : null}
 
         <Card>
-          <CardHeader title="Sender" />
-          <CardBody>
-            <SenderForm
-              initial={{
-                fromName: settings.fromName,
-                fromEmail: settings.fromEmail,
-                companyAddress: settings.companyAddress,
-                appUrl,
-              }}
-              appUrlSaved={!suggest}
-            />
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader title="Account" />
+          <CardHeader title="Account" description={`Your role: ${ROLE_LABELS[session.role]}`} />
           <CardBody>
             <AccountForm email={session.email} />
           </CardBody>
@@ -110,7 +127,7 @@ export default async function SettingsPage() {
             title="Team"
             actions={
               <Link href="/settings/team" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
-                Manage team
+                {can(session.role, "team") ? "Manage team" : "See team"}
               </Link>
             }
           />
@@ -119,6 +136,7 @@ export default async function SettingsPage() {
               {team.slice(0, 5).map((m) => (
                 <li key={m.id} className="flex flex-wrap items-center gap-2">
                   <span className="truncate">{m.email}</span>
+                  <span className="text-xs text-slate-500">{ROLE_LABELS[m.role]}</span>
                   {m.email === session.email ? <Badge tone="indigo">You</Badge> : null}
                   {m.pending ? <Badge tone="yellow">Invited</Badge> : null}
                 </li>

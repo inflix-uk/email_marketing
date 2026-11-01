@@ -1,80 +1,44 @@
 import Link from "next/link";
-import { EmailPreview } from "@/components/email-editor";
+import { Can } from "@/components/role-context";
 import { Alert } from "@/components/ui/form";
-import { Card, CardBody, CardHeader, EmptyState, PageHeader, Stat, StatusBadge, Table, TBody, Td, Th } from "@/components/ui/layout";
+import { Card, CardBody, PageHeader, StatusBadge } from "@/components/ui/layout";
 import type { Campaign } from "@/db/schema";
-import { getCampaignStats, type CampaignStats } from "@/lib/sending";
-import { cn, formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
+import { getReportSummary } from "@/lib/reports/campaign";
+import { formatUkDateTime } from "@/lib/reports/time-buckets";
+import { cn, formatNumber } from "@/lib/utils";
 import { cancelSending, deleteCampaign, duplicateCampaign, pauseSending, resumeSending } from "../actions";
 import { ActionButton, ConfirmButton } from "../_components/action-buttons";
-import { DownloadLink } from "../_components/download-link";
 import { FilterTabs } from "../_components/filter-tabs";
-import { Pagination } from "../_components/pagination";
+import { CampaignTypeResults } from "../_components/type-results";
 import { displaySubject } from "../_lib/display";
-import {
-  getListNames,
-  getRecipientsPage,
-  RECIPIENT_FILTERS,
-  RECIPIENTS_PAGE_SIZE,
-  type RecipientFilter,
-  type RecipientRow,
-} from "../_lib/queries";
+import { getListNames } from "../_lib/queries";
 import { AutoRefresh } from "./auto-refresh";
+import { PrintButton } from "./print-button";
+import { ReportClickMap } from "./report-click-map";
+import { ReportDevices } from "./report-devices";
+import { ReportLinks } from "./report-links";
+import { ReportOverview } from "./report-overview";
+import { ReportRecipients } from "./report-recipients";
+import { REPORT_TAB_LABELS, REPORT_TABS, reportHref, type ReportState } from "./report-state";
 
-const FILTER_LABELS: Record<RecipientFilter, string> = {
-  all: "All",
-  opened: "Opened",
-  clicked: "Clicked",
-  unsubscribed: "Unsubscribed",
-  bounced: "Bounced",
-  failed: "Not sent",
-};
-
-function filterCount(filter: RecipientFilter, stats: CampaignStats): number {
-  switch (filter) {
-    case "opened":
-      return stats.opened;
-    case "clicked":
-      return stats.clicked;
-    case "unsubscribed":
-      return stats.unsubscribed;
-    case "bounced":
-      return stats.bounced;
-    case "failed":
-      return stats.failed + stats.skipped;
-    default:
-      return stats.total;
-  }
-}
-
-/** /campaigns/[id] once a campaign has been queued: progress and results. */
-export async function CampaignReport({ campaign, filter, page }: { campaign: Campaign; filter: RecipientFilter; page: number }) {
-  const [stats, recipients, lists] = await Promise.all([
-    getCampaignStats(campaign.id),
-    getRecipientsPage(campaign.id, filter, page),
+/** /campaigns/[id] once a campaign has been queued: progress and results, in tabs (?tab=). */
+export async function CampaignReport({ campaign, state }: { campaign: Campaign; state: ReportState }) {
+  const options = { hideBots: state.hideBots };
+  const [summary, lists] = await Promise.all([
+    getReportSummary(campaign.id, options),
     getListNames(campaign.listIds ?? []),
   ]);
 
-  const total = stats.total || campaign.totalRecipients;
-  const processed = stats.sent + stats.failed + stats.skipped;
+  const total = summary.total || campaign.totalRecipients;
+  const processed = summary.sent + summary.filters.failed;
   const inProgress = campaign.status === "sending" || campaign.status === "paused";
-
-  const baseHref = `/campaigns/${campaign.id}`;
-  const recipientsHref = (f: RecipientFilter, p = 1) => {
-    const qs = new URLSearchParams();
-    if (f !== "all") qs.set("filter", f);
-    if (p > 1) qs.set("page", String(p));
-    const s = qs.toString();
-    return s ? `${baseHref}?${s}#recipients` : `${baseHref}#recipients`;
-  };
-  // Only show filters that have someone in them (plus All).
-  const filters = RECIPIENT_FILTERS.filter((f) => f === "all" || f === filter || filterCount(f, stats) > 0);
+  const updatedAt = new Date();
 
   return (
-    <>
+    <div data-print-report>
       <PageHeader
         back={
-          <Link href="/campaigns" className="font-medium text-slate-500 hover:text-slate-700">
+          <Link href="/campaigns" className="font-medium text-slate-500 hover:text-slate-700 print:hidden">
             &larr; Campaigns
           </Link>
         }
@@ -87,7 +51,8 @@ export async function CampaignReport({ campaign, filter, page }: { campaign: Cam
           </span>
         }
         actions={
-          <>
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <Can permission="send">
             {campaign.status === "sending" ? (
               <ActionButton action={pauseSending.bind(null, campaign.id)} pendingText="Pausing...">
                 Pause
@@ -110,9 +75,14 @@ export async function CampaignReport({ campaign, filter, page }: { campaign: Cam
                 pendingText="Stopping..."
               />
             ) : null}
+            </Can>
+            <Can permission="edit">
             <ActionButton action={duplicateCampaign.bind(null, campaign.id)} pendingText="Copying...">
               Send again
             </ActionButton>
+            </Can>
+            <PrintButton />
+            <Can permission="delete">
             {campaign.status === "sent" || campaign.status === "cancelled" ? (
               <ConfirmButton
                 action={deleteCampaign.bind(null, campaign.id)}
@@ -124,7 +94,8 @@ export async function CampaignReport({ campaign, filter, page }: { campaign: Cam
                 pendingText="Deleting..."
               />
             ) : null}
-          </>
+            </Can>
+          </div>
         }
       />
 
@@ -139,7 +110,7 @@ export async function CampaignReport({ campaign, filter, page }: { campaign: Cam
           <CardBody className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
               <span className="font-medium text-slate-900">
-                {campaign.status === "paused" ? "Paused" : "Sending"} · {formatNumber(stats.sent)} of {formatNumber(total)} sent
+                {campaign.status === "paused" ? "Paused" : "Sending"} · {formatNumber(summary.sent)} of {formatNumber(total)} sent
               </span>
               {campaign.status === "sending" ? <AutoRefresh /> : null}
             </div>
@@ -160,57 +131,54 @@ export async function CampaignReport({ campaign, filter, page }: { campaign: Cam
         </Card>
       ) : null}
 
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <Stat label="Sent" value={formatNumber(stats.sent)} hint={`of ${formatNumber(total)}`} />
-        <Stat label="Opened" value={formatPercent(stats.opened, stats.sent)} hint={`${formatNumber(stats.opened)} people`} />
-        <Stat label="Clicked" value={formatPercent(stats.clicked, stats.sent)} hint={`${formatNumber(stats.clicked)} people`} />
-        <Stat label="Unsubscribed" value={formatNumber(stats.unsubscribed)} />
-        <Stat label="Bounced" value={formatNumber(stats.bounced)} />
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+        <FilterTabs
+          label="Report sections"
+          className="min-w-0 flex-1 print:hidden"
+          tabs={REPORT_TABS.map((tab) => ({
+            label: REPORT_TAB_LABELS[tab],
+            href: reportHref(state, { tab, page: 1, sendId: null }),
+            active: tab === state.tab,
+          }))}
+        />
+        <div className="flex flex-wrap items-center gap-3 pb-2 text-xs text-slate-500">
+          {inProgress ? (
+            <span
+              className="rounded-md bg-amber-50 px-2 py-0.5 font-medium text-amber-800 ring-1 ring-inset ring-amber-600/20"
+              title="Still sending: these numbers will change."
+            >
+              Running · numbers will change
+            </span>
+          ) : null}
+          <span title="Times on this page are UK time (Europe/London).">Last updated {formatUkDateTime(updatedAt)} UK time</span>
+          <Link
+            href={reportHref(state, { hideBots: !state.hideBots, page: 1 })}
+            scroll={false}
+            className="inline-flex items-center gap-1.5 font-medium text-slate-600 hover:text-slate-900 print:hidden"
+            title="Leaves out link scanners, clicks within 2 seconds of sending and Apple Mail's automatic opens."
+            aria-pressed={state.hideBots}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "inline-flex h-4 w-7 items-center rounded-full p-0.5 transition-colors",
+                state.hideBots ? "bg-indigo-600" : "bg-slate-300",
+              )}
+            >
+              <span className={cn("h-3 w-3 rounded-full bg-white transition-transform", state.hideBots && "translate-x-3")} />
+            </span>
+            Hide suspected bots
+          </Link>
+        </div>
       </div>
 
-      <div className="grid items-start gap-6 xl:grid-cols-5">
-        <Card id="recipients" className="scroll-mt-6 overflow-hidden xl:col-span-3">
-          <CardHeader
-            title="Recipients"
-            actions={stats.total > 0 ? <DownloadLink href={`/api/campaigns/${campaign.id}/export`}>Export</DownloadLink> : null}
-          />
-          <FilterTabs
-            label="Filter recipients"
-            className="px-3"
-            tabs={filters.map((f) => ({
-              label: FILTER_LABELS[f],
-              href: recipientsHref(f),
-              active: f === filter,
-              count: filterCount(f, stats),
-            }))}
-          />
-          {recipients.rows.length === 0 ? (
-            <div className="p-6">
-              <EmptyState title="Nobody here yet." />
-            </div>
-          ) : (
-            <RecipientsTable rows={recipients.rows} />
-          )}
-          <Pagination
-            page={recipients.page}
-            pageCount={recipients.pageCount}
-            pageSize={RECIPIENTS_PAGE_SIZE}
-            total={recipients.total}
-            hrefFor={(p) => recipientsHref(filter, p)}
-          />
-        </Card>
-
-        <Card className="overflow-hidden xl:sticky xl:top-6 xl:col-span-2">
-          <div className="border-b border-slate-200 px-4 py-2.5 text-sm">
-            <p className="truncate font-medium text-slate-900">{displaySubject(campaign.subject)}</p>
-            <p className="truncate text-xs text-slate-500">
-              From {campaign.fromName} &lt;{campaign.fromEmail}&gt;
-            </p>
-          </div>
-          <EmailPreview html={campaign.html} height={620} />
-        </Card>
-      </div>
-    </>
+      {state.tab === "overview" ? <CampaignTypeResults campaign={campaign} /> : null}
+      {state.tab === "overview" ? <ReportOverview campaign={campaign} state={state} summary={summary} /> : null}
+      {state.tab === "recipients" ? <ReportRecipients campaign={campaign} state={state} summary={summary} /> : null}
+      {state.tab === "links" ? <ReportLinks campaign={campaign} state={state} /> : null}
+      {state.tab === "click-map" ? <ReportClickMap campaign={campaign} state={state} /> : null}
+      {state.tab === "devices" ? <ReportDevices campaign={campaign} state={state} summary={summary} /> : null}
+    </div>
   );
 }
 
@@ -218,47 +186,12 @@ function statusLine(campaign: Campaign): string {
   switch (campaign.status) {
     case "sending":
     case "paused":
-      return `Started ${formatDateTime(campaign.startedAt)}`;
+      return `Started ${formatUkDateTime(campaign.startedAt)}`;
     case "sent":
-      return `Sent ${formatDateTime(campaign.completedAt ?? campaign.startedAt)}`;
+      return `Sent ${formatUkDateTime(campaign.completedAt ?? campaign.startedAt)}`;
     case "cancelled":
-      return `Stopped ${formatDateTime(campaign.completedAt ?? campaign.updatedAt)}`;
+      return `Stopped ${formatUkDateTime(campaign.completedAt ?? campaign.updatedAt)}`;
     default:
       return "";
   }
-}
-
-function RecipientsTable({ rows }: { rows: RecipientRow[] }) {
-  return (
-    <Table>
-      <thead className="bg-slate-50">
-        <tr>
-          <Th>Email</Th>
-          <Th>Status</Th>
-          <Th>Opened</Th>
-          <Th>Clicked</Th>
-        </tr>
-      </thead>
-      <TBody>
-        {rows.map((row) => (
-          <tr key={row.id}>
-            <Td className="max-w-64">
-              <Link href={`/contacts/${row.contactId}`} className="block truncate font-medium text-slate-900 hover:text-indigo-600">
-                {row.email}
-              </Link>
-            </Td>
-            <Td>
-              <span className="inline-flex flex-wrap gap-1" title={row.lastError ?? undefined}>
-                <StatusBadge status={row.status} />
-                {row.bouncedAt ? <StatusBadge status="bounced" /> : null}
-                {row.unsubscribedAt ? <StatusBadge status="unsubscribed" /> : null}
-              </span>
-            </Td>
-            <Td className="whitespace-nowrap">{row.openedAt ? formatDateTime(row.openedAt) : <span className="text-slate-400">—</span>}</Td>
-            <Td className="whitespace-nowrap">{row.clickedAt ? formatDateTime(row.clickedAt) : <span className="text-slate-400">—</span>}</Td>
-          </tr>
-        ))}
-      </TBody>
-    </Table>
-  );
 }

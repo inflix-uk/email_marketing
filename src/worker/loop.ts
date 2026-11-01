@@ -1,5 +1,6 @@
 import { collections, DatabaseNotConfiguredError } from "@/db";
 import { processDueAutomations } from "@/lib/automations";
+import { processCampaignTypes } from "@/lib/campaign-types";
 import { getSettings, isDevMailer, type AppSettings } from "@/lib/settings";
 import {
   finalizeCampaigns,
@@ -164,6 +165,10 @@ export async function runWorker(opts: WorkerOptions): Promise<void> {
       const finished = await finalizeCampaigns(scope);
       for (const c of finished) await logFinished(c, log);
 
+      // Campaign types: A/B winners, auto resends, RSS runs (never throws).
+      const typed = signal.aborted ? { lines: [], actions: 0 } : await processCampaignTypes(scope);
+      for (const line of typed.lines) log(line);
+
       // Automation emails (welcome series, drips). Their own module; a failure
       // there must never stop campaign sending.
       let automated = 0;
@@ -177,7 +182,7 @@ export async function runWorker(opts: WorkerOptions): Promise<void> {
 
       // Only real progress skips the idle wait, so a failing database can't cause a hot loop.
       const progressed = batch.sent + batch.failed + batch.retried + batch.skipped + (automated > 0 ? automated : 0);
-      busy = progressed > 0 || scheduled.started.length > 0 || finished.length > 0;
+      busy = progressed > 0 || scheduled.started.length > 0 || finished.length > 0 || typed.actions > 0;
       if (batch.dailyLimitReached && !busy) pause = LIMIT_POLL_MS;
       if (batch.errors > 0) {
         console.error("[worker] database error while sending - retrying in 5s");

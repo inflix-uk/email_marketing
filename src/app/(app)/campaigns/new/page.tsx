@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/layout";
 import { requireSession } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { ComposeForm } from "../_components/compose-form";
+import { CampaignTypeSection } from "../_components/type-section";
 import { getComposeData } from "../_lib/compose-data";
 import { firstParam } from "../_lib/queries";
 
@@ -16,7 +19,9 @@ export default async function NewCampaignPage({
   const params = await searchParams;
   const requestedTemplateId = firstParam(params.template) ?? firstParam(params.templateId);
   const [session, data] = await Promise.all([requireSession(), getComposeData(undefined, requestedTemplateId)]);
-  const initialSubject = data.designs.find((d) => d.value === data.initialDesign)?.subject ?? "";
+  // Viewers can't create campaigns.
+  if (!can(session.role, "edit")) redirect("/campaigns");
+  const initialDesign = data.designs.find((d) => d.value === data.initialDesign);
 
   return (
     <>
@@ -30,10 +35,20 @@ export default async function NewCampaignPage({
       />
       <ComposeForm
         campaignId={null}
-        initialSubject={initialSubject}
-        scheduledAt={null}
+        initial={{
+          subject: initialDesign?.subject ?? "",
+          name: "",
+          previewText: initialDesign?.previewText ?? "",
+          replyTo: "",
+          format: "html",
+          textBody: "",
+          textBodyFor: null,
+          scheduledLocal: null,
+          scheduledTimeZone: null,
+        }}
         data={data}
         defaultTestTo={session.email}
+        typeOptions={<CampaignTypeSection designs={data.designs} />}
       />
     </>
   );

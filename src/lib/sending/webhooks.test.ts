@@ -49,8 +49,11 @@ describe("Amazon SES (SNS)", () => {
     ]);
   });
 
-  it("transient and undetermined bounces are ignored", () => {
-    assert.deepEqual(events("ses", sns(bounce("Transient"))), []);
+  it("transient bounces are soft bounces; undetermined ones are ignored", () => {
+    assert.deepEqual(
+      events("ses", sns(bounce("Transient"))).map((e) => e.type),
+      ["soft_bounce", "soft_bounce"],
+    );
     assert.deepEqual(events("ses", sns(bounce("Undetermined"))), []);
   });
 
@@ -110,8 +113,10 @@ describe("Resend", () => {
     assert.equal(events("resend", body("email.bounced")).length, 1);
   });
 
-  it("temporary bounces and other events are ignored", () => {
-    assert.deepEqual(events("resend", body("email.bounced", { type: "Transient", message: "Mailbox full" })), []);
+  it("temporary bounces are soft bounces; other events are ignored", () => {
+    assert.deepEqual(events("resend", body("email.bounced", { type: "Transient", message: "Mailbox full" })), [
+      { type: "soft_bounce", email: "gone@example.com", reason: "Mailbox full", messageId: "56761188-7520-42d8-8898-ff6fc54ce618" },
+    ]);
     assert.deepEqual(events("resend", body("email.delivered")), []);
     assert.deepEqual(events("resend", body("email.delivery_delayed")), []);
   });
@@ -148,8 +153,9 @@ describe("Brevo", () => {
     assert.equal(events("brevo", body("spam"))[0].reason, undefined);
   });
 
-  it("soft bounces and everything else are ignored", () => {
-    for (const e of ["soft_bounce", "deferred", "delivered", "opened", "click", "unsubscribed"]) {
+  it("soft_bounce is a soft bounce; everything else is ignored", () => {
+    assert.equal(events("brevo", body("soft_bounce"))[0].type, "soft_bounce");
+    for (const e of ["deferred", "delivered", "opened", "click", "unsubscribed"]) {
       assert.deepEqual(events("brevo", body(e)), [], e);
     }
   });
@@ -179,9 +185,9 @@ describe("Mailgun", () => {
     ]);
   });
 
-  it("temporary failure is ignored", () => {
-    assert.deepEqual(events("mailgun", body("failed", "temporary")), []);
-    assert.deepEqual(events("mailgun", body("failed")), []);
+  it("temporary failure is a soft bounce", () => {
+    assert.equal(events("mailgun", body("failed", "temporary"))[0].type, "soft_bounce");
+    assert.equal(events("mailgun", body("failed"))[0].type, "soft_bounce");
   });
 
   it("complained is a complaint; other events are ignored", () => {

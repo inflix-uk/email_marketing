@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Can } from "@/components/role-context";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, EmptyState, PageHeader } from "@/components/ui/layout";
 import { filtersToSearchParams, hasFilters, parseContactFilters, parsePage, type ContactFilters } from "@/lib/contacts/filters";
@@ -32,11 +33,15 @@ export default async function ContactsPage({
         title="Contacts"
         actions={
           <>
-            {isEmpty ? null : <DownloadLink href={`/api/contacts/export${query ? `?${query}` : ""}`}>Export</DownloadLink>}
-            <ButtonLink href="/contacts/import" variant="secondary">
-              Import
-            </ButtonLink>
-            <ButtonLink href="/contacts/new">Add contact</ButtonLink>
+            <Can permission="export">
+              {isEmpty ? null : <DownloadLink href={`/api/contacts/export${query ? `?${query}` : ""}`}>Export</DownloadLink>}
+            </Can>
+            <Can permission="edit">
+              <ButtonLink href="/contacts/import" variant="secondary">
+                Import
+              </ButtonLink>
+              <ButtonLink href="/contacts/new">Add contact</ButtonLink>
+            </Can>
           </>
         }
       />

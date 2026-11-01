@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Can } from "@/components/role-context";
 import { Card, CardBody, EmptyState, PageHeader, Table, TBody, Td, Th } from "@/components/ui/layout";
 import { getListsWithCounts } from "@/lib/contacts/queries";
 import { formatNumber } from "@/lib/utils";
@@ -48,11 +49,13 @@ export default async function ListsPage() {
           )}
         </div>
 
-        <Card className="order-first lg:order-none">
-          <CardBody>
-            <ListForm action={createListAction} label="New list" submitLabel="Create" pendingLabel="Creating..." idPrefix="new-list" />
-          </CardBody>
-        </Card>
+        <Can permission="edit">
+          <Card className="order-first lg:order-none">
+            <CardBody>
+              <ListForm action={createListAction} label="New list" submitLabel="Create" pendingLabel="Creating..." idPrefix="new-list" />
+            </CardBody>
+          </Card>
+        </Can>
       </div>
     </>
   );

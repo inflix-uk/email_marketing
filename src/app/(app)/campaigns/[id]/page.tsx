@@ -2,13 +2,15 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { CampaignSkeleton } from "../_components/skeleton";
-import { firstParam, getCampaign, isEditable, parsePage, RECIPIENT_FILTERS, type RecipientFilter } from "../_lib/queries";
+import { RssSeriesPage } from "../_components/type-rss-series";
+import { firstParam, getCampaign, isEditable } from "../_lib/queries";
 import { displaySubject } from "../_lib/display";
 import { CampaignEditor } from "./campaign-editor";
 import { CampaignReport } from "./campaign-report";
+import { parseReportState } from "./report-state";
 
 type Params = Promise<{ id: string }>;
-type SearchParams = Promise<{ filter?: string | string[]; page?: string | string[]; notice?: string | string[] }>;
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const campaign = await getCampaign((await params).id);
@@ -31,11 +33,12 @@ export default async function CampaignPage({ params, searchParams }: { params: P
     );
   }
 
-  const requested = firstParam(query.filter);
-  const filter: RecipientFilter = RECIPIENT_FILTERS.find((f) => f === requested) ?? "all";
+  // A started RSS series shows its schedule and runs instead of a report.
+  if (campaign.type === "rss" && campaign.rss) return <RssSeriesPage campaign={campaign} />;
+
   return (
     <Suspense fallback={<CampaignSkeleton />}>
-      <CampaignReport campaign={campaign} filter={filter} page={parsePage(query.page)} />
+      <CampaignReport campaign={campaign} state={parseReportState(campaign.id, query)} />
     </Suspense>
   );
 }

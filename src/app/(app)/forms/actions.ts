@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireSession } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 import { firstErrors } from "@/lib/contacts/validation";
 import { createForm, deleteForm, updateForm } from "@/lib/forms/store";
 import { formInputSchema, type FormFieldErrors } from "@/lib/forms/validation";
@@ -42,7 +42,7 @@ function invalid(error: Parameters<typeof firstErrors>[0]): FormEditorState {
 }
 
 export async function createFormAction(_prev: FormEditorState, formData: FormData): Promise<FormEditorState> {
-  await requireSession();
+  await requirePermission("edit");
   const parsed = formInputSchema.safeParse(editorValues(formData));
   if (!parsed.success) return invalid(parsed.error);
 
@@ -52,7 +52,7 @@ export async function createFormAction(_prev: FormEditorState, formData: FormDat
 }
 
 export async function updateFormAction(id: string, _prev: FormEditorState, formData: FormData): Promise<FormEditorState> {
-  await requireSession();
+  await requirePermission("edit");
   const parsed = formInputSchema.safeParse(editorValues(formData));
   if (!parsed.success) return invalid(parsed.error);
 
@@ -63,7 +63,7 @@ export async function updateFormAction(id: string, _prev: FormEditorState, formD
 }
 
 export async function deleteFormAction(id: string): Promise<void> {
-  await requireSession();
+  await requirePermission("delete");
   await deleteForm(id);
   revalidatePath("/forms");
   redirect("/forms");

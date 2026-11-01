@@ -2,11 +2,12 @@
 
 import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import { EmailEditor } from "@/components/email-editor";
+import { useCan } from "@/components/role-context";
+import { SpamCheckPanel } from "@/components/spam-check-panel";
 import { Button } from "@/components/ui/button";
 import { Alert, Field, Input } from "@/components/ui/form";
-import { cn } from "@/lib/utils";
 import { saveTemplate, type SaveTemplateState } from "../actions";
-import { sendTemplateTest, type SendTestState } from "./actions";
+import { TestSendDialog, type TemplateTestLogItem } from "./test-send-dialog";
 
 export interface EditableTemplate {
   id: string;
@@ -25,23 +26,27 @@ const EDITOR_HEIGHT = "max(28rem, calc(100dvh - 13.5rem))";
 export function TemplateForm({
   template,
   testRecipient,
+  tests = [],
   secondaryActions,
 }: {
   /** The saved version; re-fetched after every save. */
   template: EditableTemplate;
   /** Pre-filled test address (the signed-in user). */
   testRecipient: string;
+  /** The last few test sends of this template, newest first. */
+  tests?: TemplateTestLogItem[];
   /** Quiet actions (duplicate, delete) shown at the end of the bottom row. */
   secondaryActions?: ReactNode;
 }) {
+  // Viewers may look but not save or send (the server actions refuse them anyway).
+  const canEdit = useCan("edit");
+  const canSend = useCan("send");
   const [saveState, saveAction, saving] = useActionState<SaveTemplateState, FormData>(saveTemplate, {});
-  const [testState, testAction, testing] = useActionState<SendTestState, FormData>(sendTemplateTest, {});
 
   const [name, setName] = useState(template.name);
   const [subject, setSubject] = useState(template.subject ?? "");
   const [html, setHtml] = useState(template.html);
   const [design, setDesign] = useState(template.design ?? "");
-  const [testTo, setTestTo] = useState(testRecipient);
   const formRef = useRef<HTMLFormElement>(null);
 
   const dirty =
@@ -52,6 +57,7 @@ export function TemplateForm({
 
   // Ctrl/Cmd+S saves.
   useEffect(() => {
+    if (!canEdit) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "s") {
         event.preventDefault();
@@ -60,15 +66,15 @@ export function TemplateForm({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [canEdit]);
 
   // Warn before closing / reloading the tab with unsaved changes.
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty || !canEdit) return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [dirty]);
+  }, [dirty, canEdit]);
 
   const errors = saveState.fieldErrors ?? {};
 
@@ -98,16 +104,18 @@ export function TemplateForm({
               placeholder="What's this email about?"
             />
           </Field>
-          <div className="flex flex-wrap items-center gap-3 lg:pt-[26px]">
-            <SaveStatus saving={saving} dirty={dirty} saved={Boolean(saveState.ok)} />
-            <Button type="submit" disabled={saving} title="Save (Ctrl+S)">
-              {saving ? "Saving..." : "Save"}
-            </Button>
-            {/* Saves first, then opens a new campaign with this template. */}
-            <Button type="submit" name="then" value="campaign" variant="secondary" disabled={saving}>
-              Use in campaign
-            </Button>
-          </div>
+          {canEdit ? (
+            <div className="flex flex-wrap items-center gap-3 lg:pt-[26px]">
+              <SaveStatus saving={saving} dirty={dirty} saved={Boolean(saveState.ok)} />
+              <Button type="submit" disabled={saving} title="Save (Ctrl+S)">
+                {saving ? "Saving..." : "Save"}
+              </Button>
+              {/* Saves first, then opens a new campaign with this template. */}
+              <Button type="submit" name="then" value="campaign" variant="secondary" disabled={saving}>
+                Use in campaign
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         {saveState.error && !saving ? <Alert tone="error">{saveState.error}</Alert> : null}
@@ -123,46 +131,24 @@ export function TemplateForm({
         />
       </form>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <form
-          action={(formData) => {
-            formData.set("name", name);
-            formData.set("subject", subject);
-            formData.set("previewText", template.previewText ?? "");
-            formData.set("html", html);
-            testAction(formData);
-          }}
-          className="flex flex-wrap items-center gap-2"
-        >
-          <label htmlFor="test-to" className="text-sm text-slate-600">
-            Send a test to
-          </label>
-          <Input
-            id="test-to"
-            name="to"
-            value={testTo}
-            onChange={(e) => setTestTo(e.target.value)}
-            inputMode="email"
-            autoComplete="email"
-            placeholder="you@example.com"
-            required
-            className="w-64"
+      <div className="mt-3 flex flex-wrap items-start gap-x-6 gap-y-3">
+        {canSend ? (
+          <TestSendDialog
+            templateId={template.id}
+            name={name}
+            subject={subject}
+            previewText={template.previewText ?? ""}
+            html={html}
+            defaultTo={testRecipient}
+            tests={tests}
           />
-          <Button type="submit" variant="secondary" disabled={testing}>
-            {testing ? "Sending..." : "Send test"}
-          </Button>
-          {!testing && (testState.error || testState.message) ? (
-            <p
-              role={testState.error ? "alert" : "status"}
-              className={cn(
-                "text-sm",
-                testState.error ? "text-red-600" : testState.warning ? "text-amber-700" : "text-emerald-700",
-              )}
-            >
-              {testState.error ?? testState.message}
-            </p>
-          ) : null}
-        </form>
+        ) : null}
+        <SpamCheckPanel
+          subject={subject}
+          preheader={template.previewText}
+          html={html}
+          className="min-w-0 flex-1 basis-80"
+        />
 
         {secondaryActions ? <div className="ml-auto flex items-center gap-1">{secondaryActions}</div> : null}
       </div>

@@ -7,6 +7,7 @@
 
 import { collections } from "@/db";
 import { newId, type ContactStatus } from "@/db/schema";
+import { classifyHit, trimUserAgent, type HitFlags } from "@/lib/reports/user-agent";
 
 // Send ids are UUIDs; anything else can't exist - skip the query.
 const SEND_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
@@ -18,8 +19,9 @@ export function isPlausibleSendId(sendId: string): boolean {
 // Opens and clicks from machines are not engagement. Security gateways and
 // link scanners fetch every link (and often every image) of an incoming
 // email before a person sees it, and chat apps fetch links to build previews.
-// The tracking routes skip recording when the User-Agent is obviously one of
-// those (clicks are still redirected). Kept deliberately small:
+// Hits whose User-Agent is obviously one of those are still recorded but
+// flagged `suspectedBot` (reports can hide them; they never update the
+// contact). Kept deliberately small:
 // - only self-identifying agents are filtered - a scanner posing as a normal
 //   browser is indistinguishable and is counted;
 // - image proxies of real mail apps (GoogleImageProxy, YahooMailProxy,
@@ -48,38 +50,114 @@ export function isBotUserAgent(userAgent: string | null | undefined): boolean {
 const plusOne = (field: string) => ({ $add: [{ $ifNull: [field, 0] }, 1] });
 const firstTime = (field: string, now: Date) => ({ $ifNull: [field, now] });
 
-/** Open pixel hit: +1 open, first-open timestamp, contact.lastOpenedAt. Unknown ids are ignored. */
-export async function recordOpen(sendId: string): Promise<void> {
-  if (!isPlausibleSendId(sendId)) return;
-  const { sends, contacts } = await collections();
-  const now = new Date();
-  const send = await sends.findOneAndUpdate(
-    { _id: sendId },
-    [{ $set: { openCount: plusOne("$openCount"), openedAt: firstTime("$openedAt", now), updatedAt: now } }],
-    { projection: { contactId: 1 } },
-  );
-  if (!send) return;
-  await contacts.updateOne({ _id: send.contactId }, { $set: { lastOpenedAt: now, updatedAt: now } });
+const keep = (field: string) => ({ $ifNull: [field, 0] });
+
+/** Open events stored per email (the counters keep counting after that). */
+const MAX_OPEN_EVENTS_PER_SEND = 100;
+
+/** What the tracking route knows about the request. */
+export interface HitMeta {
+  userAgent?: string | null;
+  /** ISO country code from a trusted proxy header (countryFromHeaders), else null. */
+  country?: string | null;
 }
 
 /**
- * Tracked link click: +1 click, first-click timestamp, one clicks document.
- * A click implies an open (images may be blocked), so the open is recorded too
- * (also on the contact: lastClickedAt + lastOpenedAt).
+ * Bot / proxy flags of a hit on this send, or null when the send doesn't exist.
+ * Everything is recorded (reports show raw numbers by default); suspected
+ * bots are flagged so the report can hide them.
  */
-export async function recordClick(sendId: string, url: string): Promise<void> {
+async function hitFlags(sendId: string, meta: HitMeta, now: Date): Promise<HitFlags | null> {
+  const { sends } = await collections();
+  const send = await sends.findOne({ _id: sendId }, { projection: { sentAt: 1 } });
+  if (!send) return null;
+  return classifyHit({
+    userAgent: meta.userAgent,
+    knownBot: isBotUserAgent(meta.userAgent),
+    sentAt: send.sentAt ?? null,
+    now,
+  });
+}
+
+/**
+ * Open pixel hit: +1 open, first-open timestamp, one opens event (user agent,
+ * country, bot flags) and - for people - contact.lastOpenedAt. Unique opens
+ * come from send.openedAt, so repeated hits never count a person twice.
+ * Unknown ids are ignored.
+ */
+export async function recordOpen(sendId: string, meta: HitMeta = {}): Promise<void> {
   if (!isPlausibleSendId(sendId)) return;
-  const { sends, clicks, contacts } = await collections();
   const now = new Date();
+  const flags = await hitFlags(sendId, meta, now);
+  if (!flags) return;
+  const machine = flags.suspectedBot || flags.privacyProxy;
+  const { sends, contacts, opens } = await collections();
+  const before = await sends.findOneAndUpdate(
+    { _id: sendId },
+    [
+      {
+        $set: {
+          openCount: plusOne("$openCount"),
+          botOpenCount: machine ? plusOne("$botOpenCount") : keep("$botOpenCount"),
+          openedAt: firstTime("$openedAt", now),
+          lastActivityAt: now,
+          updatedAt: now,
+        },
+      },
+    ],
+    { projection: { campaignId: 1, contactId: 1, openCount: 1 } },
+  );
+  if (!before) return;
+  if ((before.openCount ?? 0) < MAX_OPEN_EVENTS_PER_SEND) {
+    await opens.insertOne({
+      _id: newId(),
+      sendId,
+      campaignId: before.campaignId,
+      userAgent: trimUserAgent(meta.userAgent),
+      country: meta.country ?? null,
+      suspectedBot: flags.suspectedBot,
+      privacyProxy: flags.privacyProxy,
+      createdAt: now,
+    });
+  }
+  if (!flags.suspectedBot) {
+    await contacts.updateOne({ _id: before.contactId }, { $set: { lastOpenedAt: now, updatedAt: now } });
+  }
+}
+
+/**
+ * Tracked link click: +1 click, first-click timestamp, one clicks document
+ * (user agent, country, bot flag). A click implies an open (images may be
+ * blocked), so the open is recorded too (also on the contact - for people
+ * only - lastClickedAt + lastOpenedAt).
+ */
+export async function recordClick(sendId: string, url: string, meta: HitMeta = {}): Promise<void> {
+  if (!isPlausibleSendId(sendId)) return;
+  const now = new Date();
+  const flags = await hitFlags(sendId, meta, now);
+  if (!flags) return;
+  const bot = flags.suspectedBot;
+  const noOpenYet = { $eq: [{ $ifNull: ["$openCount", 0] }, 0] };
+  // A person clicking implies a person opened. If every open so far came from
+  // a bot or Apple's privacy proxy, count one more (human) open - otherwise
+  // "Hide suspected bots" would show a clicker who never opened (CTOR > 100%).
+  const noHumanOpenYet = { $lte: [{ $subtract: [{ $ifNull: ["$openCount", 0] }, keep("$botOpenCount")] }, 0] };
+  const { sends, clicks, contacts } = await collections();
   const send = await sends.findOneAndUpdate(
     { _id: sendId },
     [
       {
         $set: {
           clickCount: plusOne("$clickCount"),
+          botClickCount: bot ? plusOne("$botClickCount") : keep("$botClickCount"),
           clickedAt: firstTime("$clickedAt", now),
           openedAt: firstTime("$openedAt", now),
-          openCount: { $max: [{ $ifNull: ["$openCount", 0] }, 1] },
+          // The open implied by a bot click is a bot open too.
+          botOpenCount: bot ? { $add: [keep("$botOpenCount"), { $cond: [noOpenYet, 1, 0] }] } : keep("$botOpenCount"),
+          openCount: bot
+            ? { $max: [{ $ifNull: ["$openCount", 0] }, 1] }
+            : { $add: [{ $ifNull: ["$openCount", 0] }, { $cond: [noHumanOpenYet, 1, 0] }] },
+          lastActivityAt: now,
           updatedAt: now,
         },
       },
@@ -87,11 +165,22 @@ export async function recordClick(sendId: string, url: string): Promise<void> {
     { projection: { campaignId: 1, contactId: 1 } },
   );
   if (!send) return;
-  await clicks.insertOne({ _id: newId(), sendId, campaignId: send.campaignId, url: url.slice(0, 2048), createdAt: now });
-  await contacts.updateOne(
-    { _id: send.contactId },
-    { $set: { lastClickedAt: now, lastOpenedAt: now, updatedAt: now } },
-  );
+  await clicks.insertOne({
+    _id: newId(),
+    sendId,
+    campaignId: send.campaignId,
+    url: url.slice(0, 2048),
+    userAgent: trimUserAgent(meta.userAgent),
+    country: meta.country ?? null,
+    suspectedBot: bot,
+    createdAt: now,
+  });
+  if (!bot) {
+    await contacts.updateOne(
+      { _id: send.contactId },
+      { $set: { lastClickedAt: now, lastOpenedAt: now, updatedAt: now } },
+    );
+  }
 }
 
 export interface UnsubscribeInfo {

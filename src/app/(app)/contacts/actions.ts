@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { requireSession } from "@/lib/auth";
+import { audit } from "@/lib/audit";
+import { can } from "@/lib/permissions";
+import { requirePermission } from "@/lib/auth";
 import { BulkError, MAX_BULK_IDS, runBulkAction, type BulkResult } from "@/lib/contacts/bulk";
 import { cleanContactFilters } from "@/lib/contacts/filters";
 import {
@@ -43,7 +45,7 @@ function failure(result: Exclude<SaveContactResult, { ok: true }>): ContactFormS
 }
 
 export async function createContactAction(_prev: ContactFormState, formData: FormData): Promise<ContactFormState> {
-  await requireSession();
+  await requirePermission("edit");
   const parsed = contactInputSchema.safeParse(contactFormValues(formData));
   if (!parsed.success) {
     return { error: "Please fix the highlighted fields.", fieldErrors: firstErrors(parsed.error) };
@@ -61,7 +63,7 @@ export async function updateContactAction(
   _prev: ContactFormState,
   formData: FormData,
 ): Promise<ContactFormState> {
-  await requireSession();
+  await requirePermission("edit");
   const parsed = contactInputSchema.safeParse(contactFormValues(formData));
   if (!parsed.success) {
     return { error: "Please fix the highlighted fields.", fieldErrors: firstErrors(parsed.error) };
@@ -84,7 +86,7 @@ export interface SubscriptionState {
 }
 
 export async function unsubscribeContactAction(id: string): Promise<SubscriptionState> {
-  await requireSession();
+  await requirePermission("edit");
   const changed = await unsubscribeContact(id);
   revalidateContacts(id);
   return changed ? { message: "Unsubscribed." } : { error: "This contact is not subscribed." };
@@ -99,7 +101,7 @@ export async function resubscribeContactAction(
   _prev: SubscriptionState,
   formData: FormData,
 ): Promise<SubscriptionState> {
-  await requireSession();
+  await requirePermission("edit");
   if (formData.get("consent") !== "on") {
     return { error: "Please confirm that you have this person's consent before subscribing them." };
   }
@@ -110,8 +112,9 @@ export async function resubscribeContactAction(
 }
 
 export async function deleteContactAction(id: string): Promise<void> {
-  await requireSession();
+  const session = await requirePermission("delete");
   await deleteContact(id);
+  await audit(session, "contact.delete", { type: "contact", id });
   revalidateContacts();
   redirect("/contacts");
 }
@@ -183,14 +186,19 @@ async function bulkMessage(action: ContactBulkAction, { matched, changed }: Bulk
  * automations.
  */
 export async function bulkContactsAction(input: BulkActionInput): Promise<BulkState> {
-  await requireSession();
+  const session = await requirePermission("edit");
   const parsed = bulkSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "That action isn't valid." };
   const { action } = parsed.data;
+  if (action.type === "delete" && !can(session.role, "delete")) return { error: "Your role can't delete contacts." };
   const target = "ids" in parsed.data.target ? parsed.data.target : { filters: cleanContactFilters(parsed.data.target.filters) };
 
   try {
     const result = await runBulkAction(target, action);
+    await audit(session, `contact.bulk_${action.type}`, {
+      type: "contact",
+      details: { ...("ids" in target ? { selected: target.ids.length } : { filters: target.filters }), ...result, listId: "listId" in action ? action.listId : undefined },
+    });
     return { message: await bulkMessage(action, result) };
   } catch (err) {
     if (err instanceof BulkError) return { error: err.message };

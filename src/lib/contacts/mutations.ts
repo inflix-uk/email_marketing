@@ -175,14 +175,17 @@ export async function resubscribeContact(id: string): Promise<ContactStatus | nu
   return before?.status ?? null;
 }
 
-/** Remove the campaign history (sends and their clicks) and automation enrolments of deleted contacts. */
+/** Remove the campaign history (sends and their opens and clicks) and automation enrolments of deleted contacts. */
 export async function deleteContactHistory(contactIds: string[]): Promise<void> {
   if (contactIds.length === 0) return;
-  const { sends, clicks, enrollments } = await collections();
+  const { sends, clicks, opens, enrollments } = await collections();
   const byContact = { contactId: { $in: contactIds } };
   let sendIds: string[] = [];
   const flush = async () => {
-    if (sendIds.length > 0) await clicks.deleteMany({ sendId: { $in: sendIds } });
+    if (sendIds.length > 0) {
+      await clicks.deleteMany({ sendId: { $in: sendIds } });
+      await opens.deleteMany({ sendId: { $in: sendIds } });
+    }
     sendIds = [];
   };
   for await (const send of sends.find(byContact, { projection: { _id: 1 } })) {

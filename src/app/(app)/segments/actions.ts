@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requireSession } from "@/lib/auth";
+import { requirePermission, requireSession } from "@/lib/auth";
 import { createSegment, deleteSegment, updateSegment } from "@/lib/segments/mutations";
 import { previewRules, type SegmentPreview } from "@/lib/segments/queries";
 import { segmentErrors, segmentInputSchema, segmentRulesSchema, type SegmentErrors } from "@/lib/segments/rules";
@@ -55,7 +55,7 @@ export async function previewSegmentAction(match: unknown, rules: unknown): Prom
 }
 
 export async function createSegmentAction(_prev: SegmentFormState, formData: FormData): Promise<SegmentFormState> {
-  await requireSession();
+  await requirePermission("edit");
   const parsed = segmentInputSchema.safeParse(segmentFormValues(formData));
   if (!parsed.success) return invalid(segmentErrors(parsed.error));
 
@@ -65,7 +65,7 @@ export async function createSegmentAction(_prev: SegmentFormState, formData: For
 }
 
 export async function updateSegmentAction(id: string, _prev: SegmentFormState, formData: FormData): Promise<SegmentFormState> {
-  await requireSession();
+  await requirePermission("edit");
   const parsed = segmentInputSchema.safeParse(segmentFormValues(formData));
   if (!parsed.success) return invalid(segmentErrors(parsed.error));
 
@@ -75,7 +75,7 @@ export async function updateSegmentAction(id: string, _prev: SegmentFormState, f
 }
 
 export async function deleteSegmentAction(id: string): Promise<void> {
-  await requireSession();
+  await requirePermission("delete");
   await deleteSegment(id);
   revalidateSegments();
   redirect("/segments");

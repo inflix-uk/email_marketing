@@ -18,6 +18,15 @@ export {
   QUEUE_LOCK_STALE_MS,
 } from "./queue";
 export { sendTestEmail, MAX_TEST_RECIPIENTS } from "./test-send";
+export { sendBlockers, hasLineBreak, type SendBlocker, type SendCheckInput } from "./blockers";
+export {
+  sendTemplateTestEmails,
+  recentTemplateTests,
+  templateTestHash,
+  TEST_PROFILE,
+  type TemplateTestInput,
+  type TemplateTestResult,
+} from "./template-test";
 export {
   getCampaignStats,
   getCampaignsStats,
@@ -39,6 +48,7 @@ export {
 export {
   recordBounce,
   recordComplaint,
+  recordSoftBounce,
   mailboxRejection,
   pauseCampaignIfBouncing,
   bounceRatePercent,
@@ -76,6 +86,7 @@ export {
   isBotUserAgent,
   type UnsubscribeResult,
   type UnsubscribeInfo,
+  type HitMeta,
 } from "./tracking";
 export {
   recoverStuckSends,

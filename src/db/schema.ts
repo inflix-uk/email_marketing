@@ -1,3 +1,4 @@
+import type { Role } from "@/lib/permissions";
 // MongoDB document shapes. Every document uses a string UUID as `_id`
 // (newId()), so ids in URLs and forms are plain strings. Data-access code
 // returns app objects with `id` instead of `_id` (see fromDoc).
@@ -12,6 +13,9 @@ export type ContactStatus = (typeof CONTACT_STATUSES)[number];
 
 export const CAMPAIGN_STATUSES = ["draft", "scheduled", "sending", "paused", "sent", "cancelled"] as const;
 export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
+
+export const CAMPAIGN_FORMATS = ["html", "text"] as const;
+export type CampaignFormat = (typeof CAMPAIGN_FORMATS)[number];
 
 export const SEND_STATUSES = ["queued", "sending", "sent", "failed", "skipped"] as const;
 export type SendStatus = (typeof SEND_STATUSES)[number];
@@ -82,6 +86,25 @@ export interface TemplateDoc {
   updatedAt: Date;
 }
 
+/**
+ * [test_sends] One template test email to one address (the template test
+ * centre). Never a campaign send: no contact, no stats.
+ */
+export interface TestSendDoc {
+  _id: string;
+  templateId: string;
+  /** contentHash({ subject, html }) of what was sent, to spot later edits. */
+  contentHash: string;
+  to: string;
+  subject: string;
+  /** "Name <address>" of the sender used. */
+  sender: string;
+  status: "sent" | "failed";
+  error: string | null;
+  providerMessageId: string | null;
+  createdAt: Date;
+}
+
 /** A/B subject test: part of the audience gets subject A or B; the rest gets the winner. */
 export interface AbTest {
   subjectB: string;
@@ -91,6 +114,114 @@ export interface AbTest {
   waitHours: number;
   winner: "A" | "B" | null;
   decidedAt: Date | null;
+}
+
+// --- Campaign types (A/B test, auto resend, RSS) - logic in src/lib/campaign-types ---
+
+/** Missing = "regular". */
+export const CAMPAIGN_TYPES = ["regular", "ab", "resend", "rss"] as const;
+export type CampaignType = (typeof CAMPAIGN_TYPES)[number];
+
+/** Variant keys of a (multivariate) A/B test, at most 8. "A" is the campaign's own content. */
+export const VARIANT_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
+export type VariantKey = (typeof VARIANT_KEYS)[number];
+
+/** One version of an A/B test email. null fields fall back to the campaign's own value. */
+export interface VariantContent {
+  key: VariantKey;
+  subject: string | null;
+  /** Design picker value ("template:<id>" / "starter:<key>"); its html is copied on save. */
+  source: string | null;
+  templateId: string | null;
+  html: string | null;
+  previewText: string | null;
+  design: string | null;
+  fromName: string | null;
+}
+
+export interface VariantResult {
+  key: VariantKey;
+  sent: number;
+  /** Unique opens / clicks. */
+  opened: number;
+  clicked: number;
+}
+
+/** Stored once when the winner is picked; later opens/clicks never change it. */
+export interface VariantDecision {
+  at: Date;
+  metric: "click" | "open";
+  results: VariantResult[];
+  by: "auto" | "manual";
+}
+
+/** Multivariate A/B test (campaign.type "ab"). */
+export interface VariantTest {
+  /** What differs between the variants. */
+  variable: "subject" | "content" | "sender" | "subject_content";
+  variants: VariantContent[];
+  /** "sample": test on samplePercent%, then the winner goes to the rest. "split": everyone gets a variant. */
+  mode: "sample" | "split";
+  /** Percent of the audience in the test (all variants together), 5-90. */
+  samplePercent: number;
+  metric: "click" | "open";
+  waitHours: number;
+  /** testing -> decided, or testing -> manual (tie / no engagement) -> decided. */
+  state: "testing" | "manual" | "decided";
+  /** When the worker evaluates the test (set when sending starts). */
+  decideAt: Date | null;
+  winner: VariantKey | null;
+  decidedAt: Date | null;
+  decision: VariantDecision | null;
+  /** Set once the held-back rest of the audience was released to the winner. */
+  remainderReleasedAt: Date | null;
+}
+
+/** Auto resend (campaign.type "resend"): a second email to people who didn't open / click the first. */
+export interface ResendSettings {
+  condition: "not_opened" | "not_clicked";
+  delayHours: number;
+  /** Optional new subject (null = same subject). */
+  subject: string | null;
+  /** Optional different design (null = same email). Its html is copied on save. */
+  source: string | null;
+  templateId: string | null;
+  html: string | null;
+  previewText: string | null;
+  design: string | null;
+  state: "waiting" | "running" | "done" | "skipped";
+  /** startedAt + delay (set when the first email starts sending). */
+  dueAt: Date | null;
+  claimedAt: Date | null;
+  /** The child campaign holding the resend emails. */
+  childId: string | null;
+  resentAt: Date | null;
+  resendCount: number;
+  note: string | null;
+}
+
+/** RSS series (campaign.type "rss"): emails new feed posts on a schedule; each run is a child campaign. */
+export interface RssSettings {
+  feedUrl: string;
+  /** Max posts per email. */
+  itemCount: number;
+  frequency: "daily" | "weekly";
+  /** 0 = Sunday ... 6 = Saturday (weekly only). */
+  weekday: number;
+  /** "HH:mm" in timeZone. */
+  time: string;
+  timeZone: string;
+  nextRunAt: Date | null;
+  /** Claim while a run is in progress. */
+  runningAt: Date | null;
+  lastCheckedAt: Date | null;
+  lastRunAt: Date | null;
+  lastError: string | null;
+  /** Ids (guid / link) of posts already emailed, newest first (capped). */
+  seenIds: string[];
+  /** Newest post date already emailed. */
+  lastItemAt: Date | null;
+  runCount: number;
 }
 
 /** [campaigns] */
@@ -112,12 +243,38 @@ export interface CampaignDoc {
   /** Visual-editor design (JSON string) the html was generated from, if any. */
   design?: string | null;
   abTest?: AbTest | null;
+  /** Missing = "regular". Chosen when the campaign is created, then locked. */
+  type?: CampaignType;
+  variantTest?: VariantTest | null;
+  resend?: ResendSettings | null;
+  rss?: RssSettings | null;
+  /** Child campaigns (an RSS run, an auto resend) point at their parent. Hidden from the campaign list. */
+  parentId?: string | null;
+  runKind?: "rss" | "resend" | null;
   /** Why the system paused this campaign (e.g. high bounce rate). Cleared on resume. */
   pauseReason?: string | null;
   /** Set when a human resumed after an automatic bounce pause, so it is not paused again straight away. */
   bouncePauseIgnored?: boolean;
+  /**
+   * "html" (default when missing): HTML plus an automatic plain-text part.
+   * "text": plain text only - no HTML part, no open pixel, so reports show opens as N/A.
+   */
+  format?: CampaignFormat;
+  /** Hand-written plain-text version (merge tags allowed). null/missing = generated from the HTML. */
+  textBody?: string | null;
+  /** contentFingerprint() of the HTML when textBody was last edited - tells us the text is out of date. */
+  textBodyFor?: string | null;
+  /** Hidden from the normal campaign tabs; shown under "Archived". History is kept. */
+  archivedAt?: Date | null;
+  /** Free-text folder name for organising campaigns (null/missing = no folder). */
+  folder?: string | null;
   status: CampaignStatus;
+  /** UTC instant the worker sends at (derived from scheduledLocal + scheduledTimeZone). */
   scheduledAt: Date | null;
+  /** Wall-clock send time as picked, "YYYY-MM-DDTHH:mm". */
+  scheduledLocal?: string | null;
+  /** IANA timezone of scheduledLocal, e.g. "Europe/London". */
+  scheduledTimeZone?: string | null;
   startedAt: Date | null;
   completedAt: Date | null;
   /** Number of sends created when the campaign was queued. */
@@ -138,8 +295,8 @@ export interface SendDoc {
   campaignId: string;
   kind?: "campaign" | "automation";
   automationId?: string | null;
-  /** A/B test variant; null/missing = not in the test group (receives the winning subject). */
-  variant?: "A" | "B" | null;
+  /** A/B test variant; null/missing = not in the test group (receives the winner). */
+  variant?: VariantKey | null;
   bouncedAt?: Date | null;
   complainedAt?: Date | null;
   contactId: string;
@@ -154,18 +311,44 @@ export interface SendDoc {
   openedAt: Date | null;
   clickedAt: Date | null;
   unsubscribedAt: Date | null;
+  /** Every recorded open / click, including suspected bots (raw). */
   openCount: number;
   clickCount: number;
+  /** How many of openCount / clickCount were suspected bots or Apple privacy-proxy opens. Missing = 0 (older data). */
+  botOpenCount?: number;
+  botClickCount?: number;
+  /** A temporary delivery problem reported by the provider (mailbox full...). */
+  softBouncedAt?: Date | null;
+  /** Latest open/click. Missing on older data. */
+  lastActivityAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
-/** [clicks] One per tracked link click. */
+/** [clicks] One per tracked link click (suspected bots included, flagged). */
 export interface ClickDoc {
   _id: string;
   sendId: string;
   campaignId: string;
   url: string;
+  // Optional: older clicks don't have these (they were all counted as people).
+  userAgent?: string | null;
+  /** ISO country code from the hosting proxy's header, if it sent one. */
+  country?: string | null;
+  suspectedBot?: boolean;
+  createdAt: Date;
+}
+
+/** [opens] One per open-pixel hit (suspected bots included, flagged). Older campaigns have none. */
+export interface OpenDoc {
+  _id: string;
+  sendId: string;
+  campaignId: string;
+  userAgent: string | null;
+  country: string | null;
+  suspectedBot: boolean;
+  /** Apple Mail Privacy Protection loaded the images. */
+  privacyProxy: boolean;
   createdAt: Date;
 }
 
@@ -178,10 +361,29 @@ export interface UserDoc {
   name?: string | null;
   /** Bumped to sign out every session of this user (password change, "sign out everywhere"). */
   sessionVersion?: number;
+  /** "admin" | "editor" | "viewer" (lib/permissions.ts). Missing on older accounts = admin. */
+  role?: Role | null;
   resetTokenHash?: string | null;
   resetTokenExpiresAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+// --- Activity log -----------------------------------------------------------
+
+/** One entry in the activity log (Settings > Activity log). Never holds secrets. */
+export interface AuditLogDoc {
+  _id: string;
+  /** The user's id, or null for system actions (worker, scripts). */
+  actorId: string | null;
+  actorEmail: string | null;
+  /** e.g. "campaign.send", "settings.sender", "team.role". */
+  action: string;
+  /** e.g. "campaign", "contact", "settings", "user". */
+  objectType: string;
+  objectId: string | null;
+  details: Record<string, unknown> | null;
+  createdAt: Date;
 }
 
 // --- Segments ---------------------------------------------------------------
@@ -317,6 +519,18 @@ export interface RateLimitDoc {
   _id: string;
   count: number;
   expiresAt: Date;
+}
+
+/** [reports] A saved /reports view: its name and URL query string, private to its owner. */
+export interface ReportDoc {
+  _id: string;
+  name: string;
+  /** Report settings as a query string (range, from, to, group, list, m1, m2, compare). */
+  query: string;
+  /** users._id of the person who saved it. */
+  ownerId: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // ---------------------------------------------------------------------------

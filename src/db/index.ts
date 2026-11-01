@@ -3,6 +3,7 @@ import { getMongoUri } from "@/lib/config";
 import type { SettingsDoc } from "@/lib/settings";
 import type {
   ApiKeyDoc,
+  AuditLogDoc,
   AutomationDoc,
   CampaignDoc,
   ClickDoc,
@@ -10,10 +11,13 @@ import type {
   EnrollmentDoc,
   FormDoc,
   ListDoc,
+  OpenDoc,
   RateLimitDoc,
+  ReportDoc,
   SegmentDoc,
   SendDoc,
   TemplateDoc,
+  TestSendDoc,
   UserDoc,
 } from "./schema";
 
@@ -71,9 +75,11 @@ export async function collections() {
     contacts: db.collection<ContactDoc>("contacts"),
     lists: db.collection<ListDoc>("lists"),
     templates: db.collection<TemplateDoc>("templates"),
+    testSends: db.collection<TestSendDoc>("test_sends"),
     campaigns: db.collection<CampaignDoc>("campaigns"),
     sends: db.collection<SendDoc>("sends"),
     clicks: db.collection<ClickDoc>("clicks"),
+    opens: db.collection<OpenDoc>("opens"),
     users: db.collection<UserDoc>("users"),
     settings: db.collection<SettingsDoc>("settings"),
     segments: db.collection<SegmentDoc>("segments"),
@@ -82,6 +88,8 @@ export async function collections() {
     enrollments: db.collection<EnrollmentDoc>("enrollments"),
     apiKeys: db.collection<ApiKeyDoc>("apiKeys"),
     rateLimits: db.collection<RateLimitDoc>("rateLimits"),
+    reports: db.collection<ReportDoc>("reports"),
+    auditLog: db.collection<AuditLogDoc>("audit_log"),
   };
 }
 
@@ -100,9 +108,14 @@ async function ensureIndexes(db: Db): Promise<void> {
     ]),
     db.collection("lists").createIndexes([{ key: { createdAt: -1 } }]),
     db.collection("templates").createIndexes([{ key: { updatedAt: -1 } }]),
+    db.collection("test_sends").createIndexes([{ key: { templateId: 1, createdAt: -1 } }]),
     db.collection("campaigns").createIndexes([
       { key: { status: 1, scheduledAt: 1 } },
       { key: { updatedAt: -1 } },
+      { key: { archivedAt: 1, status: 1, updatedAt: -1 } },
+      // Campaign types: runs of an RSS series / a resend, and the worker's due checks.
+      { key: { parentId: 1, createdAt: -1 }, sparse: true },
+      { key: { type: 1, status: 1 }, sparse: true },
     ]),
     db.collection("sends").createIndexes([
       { key: { campaignId: 1, contactId: 1 }, unique: true },
@@ -112,6 +125,7 @@ async function ensureIndexes(db: Db): Promise<void> {
       { key: { status: 1, automationId: 1, nextRunAt: 1 } },
     ]),
     db.collection("clicks").createIndexes([{ key: { campaignId: 1 } }, { key: { sendId: 1 } }]),
+    db.collection("opens").createIndexes([{ key: { campaignId: 1, createdAt: 1 } }, { key: { sendId: 1 } }]),
     db.collection("users").createIndexes([{ key: { email: 1 }, unique: true }, { key: { resetTokenHash: 1 }, sparse: true }]),
     db.collection("sends").createIndexes([{ key: { email: 1, sentAt: -1 } }, { key: { sentAt: 1 } }, { key: { messageId: 1 }, sparse: true }]),
     db.collection("enrollments").createIndexes([
@@ -122,6 +136,9 @@ async function ensureIndexes(db: Db): Promise<void> {
     db.collection("automations").createIndexes([{ key: { status: 1 } }]),
     db.collection("apiKeys").createIndexes([{ key: { keyHash: 1 }, unique: true }]),
     db.collection("rateLimits").createIndexes([{ key: { expiresAt: 1 }, expireAfterSeconds: 0 }]),
+    db.collection("reports").createIndexes([{ key: { ownerId: 1, name: 1 } }]),
+    db.collection("campaigns").createIndexes([{ key: { startedAt: -1 } }]),
+    db.collection("audit_log").createIndexes([{ key: { createdAt: -1 } }]),
   ]);
 }
 

@@ -12,6 +12,7 @@ import {
   unusablePasswordHash,
   verifyPassword,
 } from "./password";
+import { ADMIN_FILTER, can, PermissionError, roleOf, type Permission, type Role } from "./permissions";
 import { escapeHtml } from "./render";
 import {
   createSessionToken,
@@ -33,22 +34,57 @@ import { normalizeEmail } from "./utils";
 // Sessions
 // ---------------------------------------------------------------------------
 
-export async function getSession(): Promise<Session | null> {
+/**
+ * A signed-in user. `userId` and `role` are read from the database on every
+ * request, so a role change applies at once (no new sign-in needed).
+ */
+export interface AuthSession extends Session {
+  userId: string;
+  role: Role;
+}
+
+export async function getSession(): Promise<AuthSession | null> {
   const store = await cookies();
   const session = await verifySessionToken(store.get(SESSION_COOKIE)?.value);
   if (!session) return null;
   // The account must still exist (it may have been removed or its email
   // changed) and the cookie must not have been revoked since it was issued.
   const { users } = await collections();
-  const user = await users.findOne({ email: session.email }, { projection: { sessionVersion: 1 } });
-  return user && isSessionCurrent(session, user.sessionVersion) ? session : null;
+  const user = await users.findOne({ email: session.email }, { projection: { sessionVersion: 1, role: 1 } });
+  if (!user || !isSessionCurrent(session, user.sessionVersion)) return null;
+  return { ...session, userId: user._id, role: roleOf(user) };
 }
 
 /** Use at the top of every server action / route handler that reads or changes admin data. */
-export async function requireSession(): Promise<Session> {
+export async function requireSession(): Promise<AuthSession> {
   const session = await getSession();
   if (!session) redirect("/login");
   return session;
+}
+
+/**
+ * requireSession() plus a role check (see lib/permissions.ts). Use instead of
+ * requireSession() in every mutating server action, e.g.
+ * `const session = await requirePermission("send");`. Throws a PermissionError
+ * when the user's role doesn't allow it.
+ */
+export async function requirePermission(permission: Permission): Promise<AuthSession> {
+  const session = await requireSession();
+  if (!can(session.role, permission)) throw new PermissionError(permission);
+  return session;
+}
+
+/**
+ * For route handlers: the session when signed in with this permission,
+ * otherwise a 401/403 JSON response to return.
+ */
+export async function authorizeRequest(permission: Permission): Promise<{ session: AuthSession } | { response: Response }> {
+  const session = await getSession();
+  if (!session) return { response: Response.json({ error: "Unauthorized" }, { status: 401 }) };
+  if (!can(session.role, permission)) {
+    return { response: Response.json({ error: "Your role doesn't allow this." }, { status: 403 }) };
+  }
+  return { session };
 }
 
 /** Sign this browser in. `sessionVersion` is looked up when the caller doesn't already have it. */
@@ -118,6 +154,8 @@ export async function createUser(email: string, password: string, name?: string 
     passwordHash: await hashPassword(password),
     name: name?.trim() || null,
     sessionVersion: 0,
+    // The account made on the setup screen runs the place.
+    role: "admin",
     createdAt: now,
     updatedAt: now,
   });
@@ -319,13 +357,14 @@ export async function sendPasswordLinkEmail(to: string, url: string, kind: Passw
 }
 
 // ---------------------------------------------------------------------------
-// Team (Settings > Team). Every account has the same access.
+// Team (Settings > Team). Each account has a role (lib/permissions.ts).
 // ---------------------------------------------------------------------------
 
 export interface TeamMember {
   id: string;
   email: string;
   name: string | null;
+  role: Role;
   createdAt: Date;
   /** Invited, but has not set a password yet. */
   pending: boolean;
@@ -334,13 +373,14 @@ export interface TeamMember {
 export async function listTeam(): Promise<TeamMember[]> {
   const { users } = await collections();
   const docs = await users
-    .find({}, { projection: { email: 1, name: 1, createdAt: 1, passwordHash: 1 } })
+    .find({}, { projection: { email: 1, name: 1, role: 1, createdAt: 1, passwordHash: 1 } })
     .sort({ createdAt: 1, _id: 1 })
     .toArray();
   return docs.map((u) => ({
     id: u._id,
     email: u.email,
     name: u.name ?? null,
+    role: roleOf(u),
     createdAt: u.createdAt,
     pending: !hasUsablePassword(u.passwordHash),
   }));
@@ -350,7 +390,7 @@ export async function listTeam(): Promise<TeamMember[]> {
  * Create an account with no usable password and a "set your password" link.
  * Returns null when the email already has an account.
  */
-export async function inviteTeammate(email: string, name: string | null): Promise<PasswordLink | null> {
+export async function inviteTeammate(email: string, name: string | null, role: Role = "editor"): Promise<PasswordLink | null> {
   const { users } = await collections();
   const now = new Date();
   const normalized = normalizeEmail(email);
@@ -361,6 +401,7 @@ export async function inviteTeammate(email: string, name: string | null): Promis
       passwordHash: unusablePasswordHash(),
       name: name?.trim() || null,
       sessionVersion: 0,
+      role,
       createdAt: now,
       updatedAt: now,
     });
@@ -380,7 +421,7 @@ export async function renewInviteLink(userId: string): Promise<(PasswordLink & {
   return link ? { ...link, email: user.email } : null;
 }
 
-export type RemoveTeammateError = "self" | "last" | "gone";
+export type RemoveTeammateError = "self" | "last" | "last-admin" | "gone";
 
 /**
  * Remove an account (its sessions stop working at once). Never your own and
@@ -388,10 +429,11 @@ export type RemoveTeammateError = "self" | "last" | "gone";
  */
 export async function removeTeammate(userId: string, actingEmail: string): Promise<RemoveTeammateError | null> {
   const { users } = await collections();
-  const target = await users.findOne({ _id: userId }, { projection: { email: 1 } });
+  const target = await users.findOne({ _id: userId }, { projection: { email: 1, role: 1 } });
   if (!target) return "gone";
   if (target.email === actingEmail) return "self";
   if ((await users.countDocuments({}, { limit: 2 })) < 2) return "last";
+  if (roleOf(target) === "admin" && (await users.countDocuments(ADMIN_FILTER, { limit: 2 })) < 2) return "last-admin";
 
   const removed = await users.findOneAndDelete({ _id: userId, email: { $ne: actingEmail } });
   if (!removed) return "gone";
@@ -402,4 +444,35 @@ export async function removeTeammate(userId: string, actingEmail: string): Promi
     return "last";
   }
   return null;
+}
+
+export type SetRoleError = "self" | "last-admin" | "gone";
+
+/**
+ * Change a teammate's role. Not your own (so an admin can't lock themselves
+ * out), and never the last admin. Takes effect on their next page load.
+ * Returns the previous role, or an error.
+ */
+export async function setTeammateRole(
+  userId: string,
+  role: Role,
+  actingEmail: string,
+): Promise<{ previous: Role; email: string } | { error: SetRoleError }> {
+  const { users } = await collections();
+  const target = await users.findOne({ _id: userId }, { projection: { email: 1, role: 1 } });
+  if (!target) return { error: "gone" };
+  if (target.email === actingEmail) return { error: "self" };
+  const previous = roleOf(target);
+  if (previous === role) return { previous, email: target.email };
+  if (previous === "admin" && (await users.countDocuments(ADMIN_FILTER, { limit: 2 })) < 2) {
+    return { error: "last-admin" };
+  }
+  const result = await users.updateOne({ _id: userId }, { $set: { role, updatedAt: new Date() } });
+  if (!result.matchedCount) return { error: "gone" };
+  // Two admins demoting each other at the same moment could leave none: undo.
+  if ((await users.countDocuments(ADMIN_FILTER, { limit: 1 })) === 0) {
+    await users.updateOne({ _id: userId }, { $set: { role: "admin", updatedAt: new Date() } });
+    return { error: "last-admin" };
+  }
+  return { previous, email: target.email };
 }

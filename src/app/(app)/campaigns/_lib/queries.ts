@@ -124,7 +124,7 @@ export interface RecipientRow {
   unsubscribedAt: Date | null;
   bouncedAt: Date | null;
   complainedAt: Date | null;
-  variant: "A" | "B" | null;
+  variant: SendDoc["variant"] | null;
   openCount: number;
   clickCount: number;
 }

@@ -4,10 +4,10 @@
 // address (`(await getSettings()).companyAddress`) once per batch.
 
 import type { OutgoingEmail } from "@/lib/mailer";
+import { ensureUnsubscribeText, htmlToPlainText, stripHiddenElements } from "@/lib/plain-text";
 import {
   escapeHtml,
   extractMergeTags,
-  htmlToText,
   renderMergeTags,
   type MergeContact,
   type MergeData,
@@ -28,6 +28,10 @@ export interface EmailContent {
   fromName: string;
   fromEmail: string;
   replyTo?: string | null;
+  /** "text" = plain text only: no HTML part, no open pixel, no click tracking. Missing = "html". */
+  format?: "html" | "text";
+  /** Hand-written plain-text version (merge tags allowed). Empty = generated from the HTML. */
+  textBody?: string | null;
 }
 
 /** Per-batch context shared by every message of a campaign send. */
@@ -86,31 +90,39 @@ export function buildEmail(content: EmailContent, contact: MergeContact, opts: B
     html = appendUnsubscribeFooter(html, opts.unsubscribeUrl, companyAddress);
   }
 
-  // Plain-text part from the untracked HTML: readable URLs, no hidden preheader.
-  const text = htmlToText(stripHiddenElements(html));
+  // Plain-text part: the hand-written version, else generated from the untracked
+  // HTML (readable "text (url)" links, no hidden preheader). Always carries the unsubscribe link.
+  const manualText = content.textBody?.trim() ? renderMergeTags(content.textBody, data).trim() : "";
+  const text = ensureUnsubscribeText(manualText || htmlToPlainText(html), opts.unsubscribeUrl);
+
+  const headers: Record<string, string> = {};
+  if (opts.sendId !== null) {
+    headers["List-Unsubscribe"] = `<${buildOneClickUnsubscribeUrl(opts.links, opts.sendId)}>`;
+    headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click";
+  }
+  const envelope = {
+    to: contact.email,
+    from: { name: oneLine(content.fromName), address: content.fromEmail.trim() },
+    replyTo: content.replyTo?.trim() || null,
+    subject,
+  };
+
+  // Plain text only: no HTML part, so no open pixel and no tracked links.
+  if (content.format === "text") {
+    return { ...envelope, html: "", text, textOnly: true, headers };
+  }
 
   const previewText = content.previewText?.trim()
     ? oneLine(renderMergeTags(content.previewText, data, { escape: true }))
     : "";
   if (previewText) html = injectPreheader(html, previewText);
 
-  const headers: Record<string, string> = {};
   if (opts.sendId !== null) {
     html = rewriteLinks(html, opts.sendId, opts.links);
     html = addOpenPixel(html, opts.sendId, opts.links);
-    headers["List-Unsubscribe"] = `<${buildOneClickUnsubscribeUrl(opts.links, opts.sendId)}>`;
-    headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click";
   }
 
-  return {
-    to: contact.email,
-    from: { name: oneLine(content.fromName), address: content.fromEmail.trim() },
-    replyTo: content.replyTo?.trim() || null,
-    subject,
-    html,
-    text,
-    headers,
-  };
+  return { ...envelope, html, text, headers };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,10 +176,7 @@ function textOf(html: string): string {
 
 const HIDDEN_ELEMENT_RE = /<(div|span)\b[^>]*display\s*:\s*none[^>]*>([\s\S]*?)<\/\1>/gi;
 
-/** Remove display:none elements (preheaders) - used before generating the text part. */
-export function stripHiddenElements(html: string): string {
-  return html.replace(HIDDEN_ELEMENT_RE, "");
-}
+export { stripHiddenElements };
 
 /** Filler after the preheader so inbox previews don't pull in the body text. */
 const PREHEADER_FILLER = "&#847;&zwnj;&nbsp;".repeat(40);

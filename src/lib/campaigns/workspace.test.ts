@@ -46,6 +46,16 @@ describe("campaign workspace", () => {
     assert.equal(defaultTab({ sent: 0, drafts: 0, outbox: 0, archived: 3 }), "sent");
   });
 
+  it("opens Drafts when a draft was saved after the last send", () => {
+    const counts = { sent: 4, drafts: 1, outbox: 0, archived: 0 };
+    const older = new Date("2026-01-01T10:00:00Z");
+    const newer = new Date("2026-01-02T10:00:00Z");
+    assert.equal(defaultTab(counts, { draftSavedAt: newer, lastSentAt: older }), "drafts");
+    assert.equal(defaultTab(counts, { draftSavedAt: older, lastSentAt: newer }), "sent");
+    assert.equal(defaultTab(counts, { draftSavedAt: newer, lastSentAt: null }), "drafts");
+    assert.equal(defaultTab({ ...counts, drafts: 0 }, { draftSavedAt: newer, lastSentAt: older }), "sent");
+  });
+
   it("builds URLs without defaults", () => {
     assert.equal(workspaceHref({ tab: "drafts", sort: "date", page: 1 }), "/campaigns?tab=drafts");
     assert.equal(workspaceHref({ q: "a b", sort: "name", page: 2 }), "/campaigns?q=a+b&sort=name&page=2");

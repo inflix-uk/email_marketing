@@ -1,4 +1,5 @@
-import { escapeText, hasText, renderRichInline, renderRichParagraphs, sanitizeImageUrl, sanitizeLinkUrl } from "./rich-text";
+import { markdownToRichHtml, richHtmlParagraphs } from "./rich-html";
+import { escapeText, hasText, sanitizeImageUrl, sanitizeLinkUrl } from "./rich-text";
 import {
   FONT_FAMILIES,
   type Align,
@@ -87,8 +88,17 @@ function renderHeading(block: HeadingBlock, ctx: Context): string {
   return `<${tag} style="${style}">${escapeText(block.text.trim())}</${tag}>`;
 }
 
+/**
+ * A text / footer block's paragraphs as inline HTML. Stored HTML is
+ * sanitised again here, so only the safe subset ever reaches an email.
+ */
+function richParagraphs(block: Pick<TextBlock, "text" | "format">, link: string): string[] {
+  const html = block.format === "html" ? block.text : markdownToRichHtml(block.text);
+  return richHtmlParagraphs(html, { linkStyle: link });
+}
+
 function renderText(block: TextBlock, ctx: Context): string {
-  const paragraphs = renderRichParagraphs(block.text, { linkStyle: linkStyle(ctx) });
+  const paragraphs = richParagraphs(block, linkStyle(ctx));
   if (paragraphs.length === 0) return ctx.placeholders ? placeholder(ctx, "Empty text block") : "";
   const style =
     `font-family:${ctx.font};${TEXT_SIZES[block.size]}color:${block.color ?? ctx.styles.textColor};` +
@@ -96,7 +106,7 @@ function renderText(block: TextBlock, ctx: Context): string {
   return paragraphs
     .map((html, i) => {
       const margin = i === paragraphs.length - 1 ? "margin:0;" : "margin:0 0 16px;";
-      return `<p style="${margin}${style}">${html}</p>`;
+      return `<p style="${margin}${style}">${html || "&nbsp;"}</p>`;
     })
     .join("\n");
 }
@@ -228,7 +238,7 @@ function renderFooter(block: FooterBlock, ctx: Context): string {
   const style =
     `padding:24px 16px;font-family:${ctx.font};font-size:12px;line-height:18px;color:${block.color};text-align:center;`;
   const link = linkStyle(ctx, block.color);
-  const text = renderRichInline(block.text, { linkStyle: link });
+  const text = richParagraphs(block, link).join("<br>\n");
   const label = escapeText(block.unsubscribeLabel.trim() || "Unsubscribe");
   const lines = ["{{company_address}}", text, `<a href="{{unsubscribe_url}}" style="${link}">${label}</a>`];
   return (
@@ -258,7 +268,7 @@ export function renderDesign(design: EmailDesign, options: RenderOptions = {}): 
     if (row) rows.push(row);
   }
   // Parsed designs always end with a footer; hand-built ones still get one.
-  footer ??= { id: "footer", type: "footer", text: "", unsubscribeLabel: "Unsubscribe", color: "#6b7280" };
+  footer ??= { id: "footer", type: "footer", text: "", format: "html", unsubscribeLabel: "Unsubscribe", color: "#6b7280" };
 
   const breakpoint = styles.contentWidth + 32;
   return `<!DOCTYPE html>

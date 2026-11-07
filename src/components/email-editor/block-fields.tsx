@@ -84,7 +84,7 @@ function TextFields({ idPrefix, block, onChange, styles }: FieldsProps<TextBlock
         id={`${idPrefix}-text`}
         label="Text"
         value={block.text}
-        onChange={(text) => onChange({ ...block, text })}
+        onChange={(text) => onChange({ ...block, text, format: "html" })}
       />
       <ChoiceField
         label="Text size"
@@ -233,7 +233,7 @@ function FooterFields({ idPrefix, block, onChange }: FieldsProps<FooterBlock>) {
         id={`${idPrefix}-text`}
         label="Footer text"
         value={block.text}
-        onChange={(text) => onChange({ ...block, text })}
+        onChange={(text) => onChange({ ...block, text, format: "html" })}
         rows={3}
       />
       <TextField

@@ -11,6 +11,7 @@ import {
   editorReducer,
   newBlockId,
   renderDesign,
+  richHtmlToPlainText,
   serializeDesign,
   type AddableBlockType,
   type Block,
@@ -72,8 +73,9 @@ function summarize(block: Block): string {
       .trim();
   switch (block.type) {
     case "heading":
-    case "text":
       return plain(block.text) || "Empty";
+    case "text":
+      return (block.format === "html" ? richHtmlToPlainText(block.text) : plain(block.text)) || "Empty";
     case "image":
       return block.alt.trim() || (block.src.trim() ? (block.src.split(/[/?#]/).filter(Boolean).pop() ?? "") : "No image yet");
     case "button":

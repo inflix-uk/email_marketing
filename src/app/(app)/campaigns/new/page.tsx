@@ -49,6 +49,7 @@ export default async function NewCampaignPage({
         data={data}
         defaultTestTo={session.email}
         typeOptions={<CampaignTypeSection designs={data.designs} />}
+        autosave
       />
     </>
   );

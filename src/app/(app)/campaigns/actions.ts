@@ -142,7 +142,7 @@ interface ScheduleChoice {
 }
 
 /** Shown on the campaign page after a new campaign was created (it gets its own URL). */
-export type ComposeNotice = "saved" | "test-sent" | "test-failed" | "scheduled";
+export type ComposeNotice = "saved" | "created" | "design-saved" | "test-sent" | "test-failed" | "scheduled";
 
 const composeSchema = z.object({
   subject: headerText(300, "The subject"),
@@ -197,14 +197,84 @@ export async function submitCampaign(
   const intent: Intent = INTENTS.find((i) => i === text(formData, "intent")) ?? "save";
   if (intent !== "save" && !can(session.role, "send")) return { error: "Your role can't send campaigns." };
 
-  const existing = campaignId ? await findCampaign(campaignId) : undefined;
-  if (campaignId && !existing) return NOT_FOUND;
+  // A new campaign that autosave already created carries its id in the form.
+  const id = campaignId ?? (idSchema.safeParse(text(formData, "campaignId")).data || null);
+  const existing = id ? await findCampaign(id) : undefined;
+  if (id && !existing) return NOT_FOUND;
   // A second "Send" (double click, retry after a slow response) is not an error: it already went out.
   if (existing && intent === "send" && ["sending", "paused", "sent"].includes(existing.status)) {
     return { ok: true, message: "This campaign is already sending." };
   }
   if (existing && !EDITABLE_STATUSES.includes(existing.status)) return notEditable(existing.status);
 
+  const saved = await saveCompose(existing, intent, formData, session.email);
+  if (!("savedId" in saved)) return saved;
+  revalidateCampaigns();
+  const { savedId, testTo, schedule, subject } = saved;
+
+  // --- Then the action
+  const result =
+    (await runCampaignTypeIntent(savedId, intent, schedule?.at ?? null)) ??
+    (await runIntent(savedId, intent, { testTo, schedule, wasScheduled: existing?.status === "scheduled" }));
+  if (result.ok && (intent === "send" || intent === "schedule")) {
+    await audit(session, `campaign.${intent}`, {
+      type: "campaign",
+      id: savedId,
+      details: { subject, scheduledAt: intent === "schedule" ? (schedule?.at ?? null) : null },
+    });
+  }
+
+  // A campaign started on /campaigns/new (even if autosave already created it)
+  // now has its own page; carry the outcome over.
+  if (!existing || text(formData, "startedNew") === "1") {
+    const notice: ComposeNotice | null =
+      intent === "save" ? "saved" : intent === "test" ? (result.ok ? "test-sent" : "test-failed") : intent === "schedule" && result.ok ? "scheduled" : null;
+    redirect(`/campaigns/${savedId}${notice ? `?notice=${notice}` : ""}`);
+  }
+  return result;
+}
+
+export interface AutosaveResult {
+  ok?: boolean;
+  /** The campaign's id (new on the first autosave of a new campaign). */
+  id?: string;
+  error?: string;
+}
+
+/**
+ * Quietly saves a draft while it is being written (debounced by the form), so
+ * it is never lost and always shows under Drafts. Only drafts: a scheduled
+ * campaign is saved with the button, which re-checks it can still go out.
+ * Doesn't revalidate, so the page the user is typing on isn't re-rendered.
+ */
+export async function autosaveCampaign(campaignId: string | null, formData: FormData): Promise<AutosaveResult> {
+  await requirePermission("edit");
+  const existing = campaignId ? await findCampaign(campaignId) : undefined;
+  if (campaignId && !existing) return { error: "This campaign no longer exists." };
+  if (existing && existing.status !== "draft") return { error: "Only drafts are saved automatically." };
+  const saved = await saveCompose(existing, "save", formData, "");
+  if (!("savedId" in saved)) return { error: saved.error ?? "Couldn't save." };
+  return { ok: true, id: saved.savedId };
+}
+
+interface SavedCompose {
+  savedId: string;
+  testTo: string[];
+  schedule: ScheduleChoice | null;
+  subject: string;
+}
+
+/**
+ * Validates the compose form for `intent` and writes the campaign (creating it
+ * when there is none yet). Returns an error state instead when anything is off,
+ * before writing, so a failed send doesn't leave a half-made campaign behind.
+ */
+async function saveCompose(
+  existing: Campaign | undefined,
+  intent: Intent,
+  formData: FormData,
+  defaultTestTo: string,
+): Promise<ActionState | SavedCompose> {
   const parsed = composeSchema.safeParse({
     subject: text(formData, "subject"),
     name: text(formData, "name"),
@@ -245,7 +315,7 @@ export async function submitCampaign(
   // send doesn't leave a half-made campaign behind.
   let testTo: string[] = [];
   if (intent === "test") {
-    const addresses = parseTestAddresses(text(formData, "testTo"), session.email);
+    const addresses = parseTestAddresses(text(formData, "testTo"), defaultTestTo);
     if ("error" in addresses) return { error: addresses.error, fieldErrors: { testTo: [addresses.error] } };
     testTo = addresses.to;
   }
@@ -321,6 +391,9 @@ export async function submitCampaign(
       html: "",
       design: null,
       templateId: null,
+      // Set explicitly: the Drafts tab filters on both.
+      parentId: null,
+      archivedAt: null,
       ...fields,
       status: "draft",
       scheduledAt: null,
@@ -332,23 +405,7 @@ export async function submitCampaign(
     await campaigns.insertOne(created);
     id = created._id;
   }
-  revalidateCampaigns();
-
-  // --- Then the action
-  const result =
-    (await runCampaignTypeIntent(id, intent, schedule?.at ?? null)) ??
-    (await runIntent(id, intent, { testTo, schedule, wasScheduled: existing?.status === "scheduled" }));
-  if (result.ok && (intent === "send" || intent === "schedule")) {
-    await audit(session, `campaign.${intent}`, { type: "campaign", id, details: { subject, scheduledAt: intent === "schedule" ? schedule?.at ?? null : null } });
-  }
-
-  if (!existing) {
-    // A new campaign now has its own page; carry the outcome over.
-    const notice: ComposeNotice | null =
-      intent === "save" ? "saved" : intent === "test" ? (result.ok ? "test-sent" : "test-failed") : intent === "schedule" && result.ok ? "scheduled" : null;
-    redirect(`/campaigns/${id}${notice ? `?notice=${notice}` : ""}`);
-  }
-  return result;
+  return { savedId: id, testTo, schedule, subject };
 }
 
 async function runIntent(

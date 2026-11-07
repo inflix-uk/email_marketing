@@ -52,17 +52,22 @@ const UNSUBSCRIBE_TAG_RE = /^\{\{\s*unsubscribe_url\s*\}\}$/i;
 const BARE_EMAIL_RE = /^[^\s/@:]+@[^\s/@:]+\.[^\s/@:]{2,}$/;
 const BARE_DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?([/?#].*)?$/i;
 
-/** Trim, and write spaces outside merge tags as %20 ("mailto:a@example.com?subject=Hi there"). */
+/** Spaces and apostrophes are written percent-encoded ("O'Brien" -> "O%27Brien"). */
+function encodeLoose(part: string): string {
+  return part.replace(/ /g, "%20").replace(/'/g, "%27");
+}
+
+/** Trim, and percent-encode spaces / apostrophes outside merge tags ("mailto:a@example.com?subject=Hi there"). */
 function tidyUrl(raw: string): string {
   const url = raw.trim();
   let out = "";
   let last = 0;
   for (const match of url.matchAll(TAG_GLOBAL)) {
     const index = match.index ?? 0;
-    out += url.slice(last, index).replace(/ /g, "%20") + match[0];
+    out += encodeLoose(url.slice(last, index)) + match[0];
     last = index + match[0].length;
   }
-  return out + url.slice(last).replace(/ /g, "%20");
+  return out + encodeLoose(url.slice(last));
 }
 
 function hasUnsafeUrlChars(url: string): boolean {
@@ -70,9 +75,12 @@ function hasUnsafeUrlChars(url: string): boolean {
   return /[\u0000- <>"'`\\\u007f]/.test(url.replace(TAG_GLOBAL, ""));
 }
 
+const TEL_RE = /^tel:\+?[0-9][0-9().\-]{2,30}$/i;
+
 /**
- * A link target that is safe to put in an href: http(s) or mailto only.
+ * A link target that is safe to put in an href: http(s), mailto or tel only.
  * "example.com/page" becomes https://..., "jo@example.com" becomes mailto:...,
+ * "tel:+44 20 1234 5678" loses its spaces,
  * and {{unsubscribe_url}} is allowed on its own. Anything else (javascript:,
  * data:, relative paths, other merge tags as the whole URL) returns "".
  */
@@ -80,6 +88,10 @@ export function sanitizeLinkUrl(raw: string): string {
   const url = tidyUrl(raw);
   if (!url) return "";
   if (UNSUBSCRIBE_TAG_RE.test(url)) return "{{unsubscribe_url}}";
+  if (/^tel:/i.test(url)) {
+    const tel = url.replace(/%20/g, "");
+    return TEL_RE.test(tel) ? tel : "";
+  }
   if (hasUnsafeUrlChars(url)) return "";
   if (/^https?:\/\/[^/]/i.test(url)) return url;
   if (/^mailto:[^\s]+@[^\s]+/i.test(url)) return url;

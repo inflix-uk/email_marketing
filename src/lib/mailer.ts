@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import nodemailer, { type Transporter } from "nodemailer";
+import nodemailer, { type SendMailOptions, type Transporter } from "nodemailer";
 import { escapeHtml, htmlToText } from "./render";
 import { getSettings, type SmtpSettings } from "./settings";
 
@@ -31,13 +31,71 @@ export interface SendResult {
 
 const globalForMailer = globalThis as unknown as { mail?: { key: string; transport: Transporter } };
 
-function transportKey(smtp: SmtpSettings): string {
-  return JSON.stringify([smtp.host.trim(), smtp.port, smtp.secure, smtp.user, smtp.pass]);
+function transportKey(smtp: SmtpSettings, name: string | undefined): string {
+  return JSON.stringify([smtp.host.trim(), smtp.port, smtp.secure, smtp.user, smtp.pass, name ?? ""]);
 }
 
-function createTransport(smtp: SmtpSettings, pool: boolean): Transporter {
+/**
+ * Hostname we announce in the SMTP greeting (EHLO). nodemailer falls back to
+ * the machine name, which in a container is not a real domain and becomes
+ * "[127.0.0.1]" - spam filters score that. Use the public app URL's host
+ * (e.g. marketing.example.com) when it is a real domain.
+ */
+export function smtpClientName(appUrl: string | null | undefined): string | undefined {
+  let host: string;
+  try {
+    host = new URL(String(appUrl ?? "").trim()).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return undefined;
+  if (/^\d+(\.\d+){3}$/.test(host)) return undefined;
+  if (/(^|\.)(localhost|local|internal|test|invalid|example|localdomain)$/.test(host)) return undefined;
+  return host;
+}
+
+/** Domain part of an address (lower-cased), or null. */
+function domainOf(address: string): string | null {
+  const at = address.lastIndexOf("@");
+  const domain = at >= 0 ? address.slice(at + 1).trim().toLowerCase() : "";
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain) ? domain : null;
+}
+
+/** RFC 5322 Message-ID at the sender's own domain (never "localhost" or the machine name). */
+export function makeMessageId(fromAddress: string): string {
+  return `<${randomUUID()}@${domainOf(fromAddress) ?? "localhost.localdomain"}>`;
+}
+
+/**
+ * The nodemailer message for an OutgoingEmail. Pure (exported for tests).
+ * nodemailer builds multipart/alternative with text/plain first and text/html
+ * last (the part clients prefer), UTF-8 with quoted-printable / base64 as
+ * needed, and a Date header; it adds no X-Mailer header.
+ */
+export function toMailOptions(msg: OutgoingEmail, text: string, now: Date = new Date()): SendMailOptions {
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(msg.headers ?? {})) {
+    // A header value must stay on one line (no header injection).
+    const clean = String(value).replace(/[\r\n]+/g, " ").trim();
+    if (clean && /^[A-Za-z0-9-]+$/.test(key)) headers[key] = clean;
+  }
+  return {
+    to: msg.to,
+    from: { name: msg.from.name, address: msg.from.address },
+    replyTo: msg.replyTo || undefined,
+    subject: msg.subject,
+    messageId: makeMessageId(msg.from.address),
+    date: now,
+    html: msg.textOnly ? undefined : msg.html,
+    text,
+    headers,
+  };
+}
+
+function createTransport(smtp: SmtpSettings, pool: boolean, name?: string): Transporter {
   return nodemailer.createTransport({
     host: smtp.host.trim(),
+    name,
     port: smtp.port,
     secure: smtp.secure,
     auth: smtp.user ? { user: smtp.user, pass: smtp.pass } : undefined,
@@ -51,11 +109,11 @@ function createTransport(smtp: SmtpSettings, pool: boolean): Transporter {
 }
 
 /** Pooled transport for the saved settings; rebuilt when they change. */
-function getTransport(smtp: SmtpSettings): Transporter {
-  const key = transportKey(smtp);
+function getTransport(smtp: SmtpSettings, name: string | undefined): Transporter {
+  const key = transportKey(smtp, name);
   if (globalForMailer.mail?.key !== key) {
     globalForMailer.mail?.transport.close();
-    globalForMailer.mail = { key, transport: createTransport(smtp, true) };
+    globalForMailer.mail = { key, transport: createTransport(smtp, true, name) };
   }
   return globalForMailer.mail.transport;
 }
@@ -72,21 +130,18 @@ export function closeMailer(): void {
  */
 export async function sendEmail(msg: OutgoingEmail, smtp?: SmtpSettings): Promise<SendResult> {
   const text = msg.text ?? htmlToText(msg.html);
-  const config = smtp ?? (await getSettings()).smtp;
+  const settings = await getSettings();
+  const config = smtp ?? settings.smtp;
   if (!config.host.trim()) return writeToOutbox(msg, text);
 
-  const transport = smtp ? createTransport(config, false) : getTransport(config);
-  const info = await transport.sendMail({
-    to: msg.to,
-    from: { name: msg.from.name, address: msg.from.address },
-    replyTo: msg.replyTo || undefined,
-    subject: msg.subject,
-    html: msg.textOnly ? undefined : msg.html,
-    text,
-    headers: msg.headers,
-  });
-  if (smtp) transport.close();
-  return { messageId: info.messageId };
+  const name = smtpClientName(settings.appUrl);
+  const transport = smtp ? createTransport(config, false, name) : getTransport(config, name);
+  try {
+    const info = await transport.sendMail(toMailOptions(msg, text));
+    return { messageId: info.messageId };
+  } finally {
+    if (smtp) transport.close();
+  }
 }
 
 async function writeToOutbox(msg: OutgoingEmail, text: string): Promise<SendResult> {
@@ -114,9 +169,10 @@ async function writeToOutbox(msg: OutgoingEmail, text: string): Promise<SendResu
 
 /** Check SMTP connection + credentials (saved settings, or `smtp` to test unsaved ones). */
 export async function verifyMailer(smtp?: SmtpSettings): Promise<{ mode: "smtp" | "dev"; ok: boolean; error?: string }> {
-  const config = smtp ?? (await getSettings()).smtp;
+  const settings = await getSettings();
+  const config = smtp ?? settings.smtp;
   if (!config.host.trim()) return { mode: "dev", ok: true };
-  const transport = createTransport(config, false);
+  const transport = createTransport(config, false, smtpClientName(settings.appUrl));
   try {
     await transport.verify();
     return { mode: "smtp", ok: true };

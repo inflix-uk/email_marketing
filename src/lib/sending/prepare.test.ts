@@ -10,6 +10,7 @@ import {
   verifyUnsubscribe,
   type LinkContext,
 } from "@/lib/tokens";
+import { renderDesign, toDesign } from "@/lib/email-design";
 import { subjectForVariant } from "./ab";
 import {
   appendUnsubscribeFooter,
@@ -128,6 +129,20 @@ describe("click tracking", () => {
     assert.equal(b.url, "http://example.org");
     assert.ok(verifyClick(LINKS, SEND_ID, b.url, b.sig));
     assert.match(html, /class="btn"/);
+  });
+
+  it("tracks text links written in the visual editor", () => {
+    const design = toDesign({
+      blocks: [{ id: "t", type: "text", format: "html", text: '<p>See <a href="example.com/offer">our offer</a></p>' }],
+    });
+    assert.ok(design);
+    const html = rewriteLinks(renderDesign(design), SEND_ID, LINKS);
+    const offer = hrefs(html)
+      .filter((href) => href.startsWith("http"))
+      .map(parseClick)
+      .find((click) => click.url === "https://example.com/offer");
+    assert.ok(offer, "the text link is click-tracked");
+    assert.ok(verifyClick(LINKS, SEND_ID, offer.url, offer.sig));
   });
 
   it("decodes &amp; in hrefs before signing and escapes & in the new href", () => {

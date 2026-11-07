@@ -16,7 +16,8 @@ import {
   updateContact,
   type SaveContactResult,
 } from "@/lib/contacts/mutations";
-import { getContact, getList } from "@/lib/contacts/queries";
+import { getContact, getList, quickSearchContacts, type QuickSearchResult } from "@/lib/contacts/queries";
+import { MAX_SEARCH_LENGTH } from "@/lib/contacts/search";
 import { contactFormValues, contactInputSchema, firstErrors, type ContactFieldErrors } from "@/lib/contacts/validation";
 
 export interface ContactFormState {
@@ -78,6 +79,18 @@ export async function updateContactAction(
 
   revalidateContacts(id);
   return { ok: true };
+}
+
+// --- Quick search -----------------------------------------------------------------
+
+const searchSchema = z.string().max(MAX_SEARCH_LENGTH * 2);
+
+/** The search box dropdown on /contacts: up to 8 matches. Read-only, so viewers may use it. */
+export async function searchContactsAction(term: string): Promise<QuickSearchResult> {
+  await requirePermission("view");
+  const parsed = searchSchema.safeParse(term);
+  if (!parsed.success) return { exactId: null, matches: [] };
+  return quickSearchContacts(parsed.data);
 }
 
 export interface SubscriptionState {

@@ -8,7 +8,7 @@ import { Alert, Input, Textarea } from "@/components/ui/form";
 import { createTemplateFromHtml, type PasteHtmlState } from "./actions";
 
 /** "Paste HTML" card: opens a window to paste email HTML (e.g. from ChatGPT) and create a template from it. */
-export function PasteHtmlCard() {
+export function PasteHtmlCard({ campaignId = null }: { campaignId?: string | null }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [html, setHtml] = useState("");
   const [state, formAction] = useActionState<PasteHtmlState, FormData>(createTemplateFromHtml, {});
@@ -35,6 +35,7 @@ export function PasteHtmlCard() {
         className="m-auto w-[calc(100%-2rem)] max-w-6xl rounded-lg bg-white p-0 shadow-xl ring-1 ring-slate-200 backdrop:bg-slate-900/40"
       >
         <form action={formAction} className="space-y-4 p-6">
+          {campaignId ? <input type="hidden" name="campaignId" value={campaignId} /> : null}
           <div>
             <h2 id="paste-html-title" className="text-base font-semibold text-slate-900">
               Paste HTML
@@ -72,7 +73,19 @@ export function PasteHtmlCard() {
             <Button type="button" variant="secondary" onClick={() => dialogRef.current?.close()}>
               Cancel
             </Button>
-            <SubmitButton pendingText="Creating...">Create template</SubmitButton>
+            {campaignId ? (
+              <SubmitButton pendingText="Creating...">Create template</SubmitButton>
+            ) : (
+              <>
+                <SubmitButton variant="secondary" pendingText="Creating...">
+                  Create template
+                </SubmitButton>
+                {/* Also makes a campaign draft with it and opens that. */}
+                <SubmitButton name="then" value="campaign" pendingText="Creating...">
+                  Create and use in campaign
+                </SubmitButton>
+              </>
+            )}
           </div>
         </form>
       </dialog>

@@ -7,6 +7,7 @@ import { filtersToSearchParams, hasFilters, parseContactFilters, parsePage, type
 import { findContacts, getListOptions } from "@/lib/contacts/queries";
 import { formatNumber } from "@/lib/utils";
 import { ContactFiltersBar } from "./_components/contact-filters";
+import { ContactSearch } from "./_components/contact-search";
 import { ContactsTable } from "./_components/contacts-table";
 import { DownloadLink } from "./_components/download-link";
 import { Pagination } from "./_components/pagination";
@@ -49,41 +50,46 @@ export default async function ContactsPage({
       {isEmpty ? (
         <EmptyState title="No contacts yet" description="Import a CSV file or add people one by one." />
       ) : (
-        <Card>
-          <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-            <ContactFiltersBar key={query} filters={filters} lists={listOptions} />
-            <p className="shrink-0 text-sm text-slate-500" aria-live="polite">
-              {formatNumber(result.total)} {result.total === 1 ? "contact" : "contacts"}
-            </p>
+        <>
+          <div className="mb-4">
+            <ContactSearch key={query} initialQuery={filters.q} listId={filters.listId} />
           </div>
+          <Card>
+            <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+              <ContactFiltersBar key={query} filters={filters} lists={listOptions} />
+              <p className="shrink-0 text-sm text-slate-500" aria-live="polite">
+                {formatNumber(result.total)} {result.total === 1 ? "contact" : "contacts"}
+              </p>
+            </div>
 
-          <ContactsTable
-            key={`${query}|${result.page}`}
-            rows={result.rows}
-            total={result.total}
-            filters={filters}
-            lists={listOptions}
-            empty={
-              <div className="px-6 py-12 text-center text-sm text-slate-500">
-                No contacts found.{" "}
-                <Link href="/contacts" className="font-medium text-indigo-600 hover:text-indigo-500">
-                  Show all
-                </Link>
-              </div>
-            }
-          />
+            <ContactsTable
+              key={`${query}|${result.page}`}
+              rows={result.rows}
+              total={result.total}
+              filters={filters}
+              lists={listOptions}
+              empty={
+                <div className="px-6 py-12 text-center text-sm text-slate-500">
+                  No contacts found.{" "}
+                  <Link href="/contacts" className="font-medium text-indigo-600 hover:text-indigo-500">
+                    Show all
+                  </Link>
+                </div>
+              }
+            />
 
-          <Pagination
-            page={result.page}
-            pageCount={result.pageCount}
-            pageSize={result.pageSize}
-            total={result.total}
-            hrefFor={(page) => {
-              const qs = filtersToSearchParams(filters, page).toString();
-              return qs ? `/contacts?${qs}` : "/contacts";
-            }}
-          />
-        </Card>
+            <Pagination
+              page={result.page}
+              pageCount={result.pageCount}
+              pageSize={result.pageSize}
+              total={result.total}
+              hrefFor={(page) => {
+                const qs = filtersToSearchParams(filters, page).toString();
+                return qs ? `/contacts?${qs}` : "/contacts";
+              }}
+            />
+          </Card>
+        </>
       )}
     </>
   );

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useRef, useState, useTransition, type ComponentProps, type ReactNode } from "react";
+import { PersonaliseSelect } from "@/components/personalise-select";
 import { Button } from "@/components/ui/button";
 import { Alert, Field, Input, Select } from "@/components/ui/form";
 import type { CampaignType } from "@/db/schema";
@@ -144,16 +145,15 @@ function AbOptions({ values, designs }: { values: TypeFormValues["ab"]; designs:
             <div key={key} className="flex flex-wrap items-end gap-3">
               <span className="mb-2 w-20 text-sm font-medium text-slate-900">Version {key}</span>
               {usesSubject ? (
-                <div className="min-w-48 flex-1">
-                  <Input
-                    name={`ct_ab_subject_${key}`}
-                    value={v.subject}
-                    onChange={(e) => update(i, { subject: e.target.value })}
-                    maxLength={300}
-                    placeholder="Subject"
-                    aria-label={`Subject for version ${key}`}
-                  />
-                </div>
+                <PersonalisedSubject
+                  className="min-w-48 flex-1"
+                  name={`ct_ab_subject_${key}`}
+                  value={v.subject}
+                  onChange={(e) => update(i, { subject: e.target.value })}
+                  maxLength={300}
+                  placeholder="Subject"
+                  aria-label={`Subject for version ${key}`}
+                />
               ) : null}
               {usesContent ? (
                 <div className="min-w-48 flex-1">
@@ -228,6 +228,17 @@ function AbOptions({ values, designs }: { values: TypeFormValues["ab"]; designs:
   );
 }
 
+/** A subject input with the "Insert personalisation" dropdown beside it. */
+function PersonalisedSubject({ className, ...props }: ComponentProps<"input">) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <div className={cn("flex gap-2", className)}>
+      <Input ref={ref} {...props} className="min-w-0 flex-1" />
+      <PersonaliseSelect inputRef={ref} className="w-44 shrink-0" />
+    </div>
+  );
+}
+
 // --- Auto resend ------------------------------------------------------------------
 
 function ResendOptions({ values, designs }: { values: TypeFormValues["resend"]; designs: DesignChoice[] }) {
@@ -258,7 +269,7 @@ function ResendOptions({ values, designs }: { values: TypeFormValues["resend"]; 
         <summary className="cursor-pointer text-sm font-medium text-indigo-600 hover:text-indigo-500">More options</summary>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <Field label="New subject" htmlFor="ct_rs_subject" hint="Leave empty to use the same subject.">
-            <Input id="ct_rs_subject" name="ct_rs_subject" maxLength={300} defaultValue={values.subject} />
+            <PersonalisedSubject id="ct_rs_subject" name="ct_rs_subject" maxLength={300} defaultValue={values.subject} />
           </Field>
           <Field label="Different template" htmlFor="ct_rs_source">
             <Select id="ct_rs_source" name="ct_rs_source" defaultValue={values.source}>

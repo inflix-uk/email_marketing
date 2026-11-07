@@ -8,7 +8,10 @@ import { ensureUnsubscribeText, htmlToPlainText, stripHiddenElements } from "@/l
 import {
   escapeHtml,
   extractMergeTags,
+  oneLine,
   renderMergeTags,
+  renderPreviewText,
+  renderSubject,
   type MergeContact,
   type MergeData,
 } from "@/lib/render";
@@ -82,7 +85,7 @@ export function buildEmail(content: EmailContent, contact: MergeContact, opts: B
   const companyAddress = opts.companyAddress?.trim() ?? "";
   const data: MergeData = { contact, unsubscribeUrl: opts.unsubscribeUrl, companyAddress };
 
-  const subject = oneLine(renderMergeTags(content.subject, data));
+  const subject = renderSubject(content.subject, data);
   let html = renderMergeTags(content.html, data, { escape: true });
 
   // Every marketing email must carry a working unsubscribe link.
@@ -113,7 +116,7 @@ export function buildEmail(content: EmailContent, contact: MergeContact, opts: B
   }
 
   const previewText = content.previewText?.trim()
-    ? oneLine(renderMergeTags(content.previewText, data, { escape: true }))
+    ? renderPreviewText(content.previewText, data)
     : "";
   if (previewText) html = injectPreheader(html, previewText);
 
@@ -128,11 +131,6 @@ export function buildEmail(content: EmailContent, contact: MergeContact, opts: B
 // ---------------------------------------------------------------------------
 // HTML transforms (exported for tests)
 // ---------------------------------------------------------------------------
-
-/** Collapse whitespace/newlines - for header values like the subject. */
-function oneLine(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
 
 const BODY_OPEN_RE = /<body\b(?:[^>"']|"[^"]*"|'[^']*')*>/i;
 

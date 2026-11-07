@@ -11,19 +11,20 @@ const CHOICES: { key: string; name: string; html: string | null }[] = [
 ];
 
 /** Design cards: one click creates the template and opens the editor. */
-export function StarterPicker() {
+export function StarterPicker({ campaignId = null }: { campaignId?: string | null }) {
   return (
     <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
       {CHOICES.map((choice) => (
         <li key={choice.key}>
           <form action={createTemplate} className="h-full">
             <input type="hidden" name="starter" value={choice.key} />
+            {campaignId ? <input type="hidden" name="campaignId" value={campaignId} /> : null}
             <StarterCard name={choice.name} html={choice.html} />
           </form>
         </li>
       ))}
       <li>
-        <PasteHtmlCard />
+        <PasteHtmlCard campaignId={campaignId} />
       </li>
     </ul>
   );

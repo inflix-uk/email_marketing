@@ -4,6 +4,7 @@ import { listTimeZones } from "@/lib/schedule";
 import { countRecipients } from "@/lib/sending";
 import { getSettings } from "@/lib/settings";
 import { STARTER_TEMPLATES } from "@/lib/starter-templates";
+import { contactFieldKeys } from "@/lib/contacts/queries";
 import { getListsWithCounts, type ListOption } from "./queries";
 import { CURRENT_DESIGN, starterValue, templateValue } from "./starting-points";
 
@@ -31,6 +32,8 @@ export interface ComposeData {
   /** Reply-to used when the campaign doesn't set its own. */
   defaultReplyTo: string;
   timeZones: string[];
+  /** Custom contact fields offered in "Insert personalisation" (e.g. country). */
+  fieldKeys: string[];
 }
 
 /** Saved templates offered in the picker (most recently edited first). */
@@ -94,7 +97,7 @@ export async function getComposeData(campaign?: Campaign, requestedTemplateId?: 
     initialDesign = templateValue(requestedTemplateId);
   }
 
-  const [lists, settings] = await Promise.all([getListsWithCounts(), getSettings()]);
+  const [lists, settings, fieldKeys] = await Promise.all([getListsWithCounts(), getSettings(), contactFieldKeys()]);
   const known = new Set(lists.map((l) => l.id));
   const initialListIds = (campaign?.listIds ?? []).filter((id) => known.has(id));
   const initialRecipients = initialListIds.length ? await countRecipients(initialListIds) : 0;
@@ -108,5 +111,6 @@ export async function getComposeData(campaign?: Campaign, requestedTemplateId?: 
     sender: { name: settings.fromName, email: settings.fromEmail },
     defaultReplyTo: settings.replyTo,
     timeZones: listTimeZones(),
+    fieldKeys,
   };
 }

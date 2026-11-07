@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { markdownToRichHtml, sanitizeRichHtml } from "./rich-html";
 
 // The visual editor's document model. A design is saved as a JSON string
 // next to the HTML generated from it (TemplateDoc.design, CampaignDoc.design,
@@ -31,7 +32,7 @@ export const IMAGE_WIDTH = { min: 10, max: 100, step: 5, default: 100 } as const
 
 export const MAX_BLOCKS = 200;
 export const MAX_COLUMN_BLOCKS = 10;
-const MAX_TEXT = 20_000;
+const MAX_TEXT = 50_000;
 const MAX_SHORT_TEXT = 500;
 const MAX_URL = 2_000;
 
@@ -68,6 +69,15 @@ const align = z.enum(ALIGNMENTS);
 const longText = z.string().max(MAX_TEXT);
 const shortText = z.string().max(MAX_SHORT_TEXT);
 const url = z.string().max(MAX_URL);
+/**
+ * How a text / footer block's `text` is written. "html" = the editor's safe
+ * HTML subset (rich-html.ts). "markdown" = the older **bold** / [text](url)
+ * syntax (rich-text.ts) of designs saved before the change; it is converted
+ * to "html" whenever a design is read (normalizeDesign).
+ */
+export const TEXT_FORMATS = ["markdown", "html"] as const;
+export type TextFormat = (typeof TEXT_FORMATS)[number];
+const textFormat = z.enum(TEXT_FORMATS).default("markdown");
 const clampedInt = (range: { min: number; max: number; default: number }) =>
   z
     .number()
@@ -98,8 +108,9 @@ const headingSchema = z.object({
 const textSchema = z.object({
   id,
   type: z.literal("text"),
-  /** Simple rich text - see rich-text.ts. */
+  /** Rich text - see `format`. */
   text: longText.default(""),
+  format: textFormat,
   align: align.default("left"),
   size: z.enum(TEXT_SIZES).default("normal"),
   /** null = the global text colour. */
@@ -157,8 +168,9 @@ const columnsSchema = z.object({
 const footerSchema = z.object({
   id,
   type: z.literal("footer"),
-  /** Rich text shown between the company address and the unsubscribe link. */
+  /** Rich text shown between the company address and the unsubscribe link - see `format`. */
   text: longText.default(""),
+  format: textFormat,
   unsubscribeLabel: shortText.default("Unsubscribe"),
   color: color.default("#6b7280"),
 });
@@ -243,7 +255,7 @@ export const DEFAULT_STYLES: DesignStyles = stylesSchema.parse({});
 export const DEFAULT_FOOTER_TEXT = "You are receiving this email because you subscribed to our updates.";
 
 export function createFooter(blockId = "footer"): FooterBlock {
-  return footerSchema.parse({ id: blockId, type: "footer", text: DEFAULT_FOOTER_TEXT });
+  return footerSchema.parse({ id: blockId, type: "footer", text: `<p>${DEFAULT_FOOTER_TEXT}</p>`, format: "html" });
 }
 
 /** A new block of the given type with sensible starting content. */
@@ -261,7 +273,7 @@ export function createBlock(type: AddableBlockType, blockId: string): Exclude<Bl
     case "heading":
       return headingSchema.parse({ id: blockId, type, text: "Your heading" });
     case "text":
-      return textSchema.parse({ id: blockId, type, text: "Write your text here." });
+      return textSchema.parse({ id: blockId, type, text: "<p>Write your text here.</p>", format: "html" });
     case "image":
       return imageSchema.parse({ id: blockId, type });
     case "button":
@@ -275,8 +287,8 @@ export function createBlock(type: AddableBlockType, blockId: string): Exclude<Bl
         id: blockId,
         type,
         columns: [
-          { blocks: [{ id: `${blockId}-a`, type: "text", text: "Left column text." }] },
-          { blocks: [{ id: `${blockId}-b`, type: "text", text: "Right column text." }] },
+          { blocks: [{ id: `${blockId}-a`, type: "text", text: "<p>Left column text.</p>", format: "html" }] },
+          { blocks: [{ id: `${blockId}-b`, type: "text", text: "<p>Right column text.</p>", format: "html" }] },
         ],
       });
   }
@@ -290,7 +302,8 @@ export const BLANK_DESIGN: EmailDesign = {
     textSchema.parse({
       id: "intro",
       type: "text",
-      text: "Hi {{first_name | there}},\n\nStart writing your email here.",
+      text: "<p>Hi {{first_name | there}},</p><p>Start writing your email here.</p>",
+      format: "html",
     }),
     createFooter(),
   ],
@@ -300,9 +313,16 @@ export const BLANK_DESIGN: EmailDesign = {
 // Parsing
 // ---------------------------------------------------------------------------
 
+/** Text in the editor's HTML subset (sanitised), converting the older markdown-style syntax. */
+function asRichHtml<T extends { text: string; format: TextFormat }>(block: T): T {
+  const text = block.format === "html" ? sanitizeRichHtml(block.text) : markdownToRichHtml(block.text);
+  return text === block.text && block.format === "html" ? block : { ...block, text, format: "html" };
+}
+
 /**
  * Enforce the invariants the editor and renderer rely on: unique block ids
- * (also inside columns) and exactly one footer, in last place.
+ * (also inside columns), exactly one footer, in last place, and rich text in
+ * the sanitised HTML format.
  */
 export function normalizeDesign(design: EmailDesign): EmailDesign {
   const seen = new Set<string>();
@@ -323,17 +343,19 @@ export function normalizeDesign(design: EmailDesign): EmailDesign {
     const blockId = unique(block.id);
     if (block.type === "columns") {
       const [left, right] = block.columns.map((column) => ({
-        blocks: column.blocks.map((child) => {
+        blocks: column.blocks.map((original) => {
+          const child = original.type === "text" ? asRichHtml(original) : original;
           const childId = unique(child.id);
           return childId === child.id ? child : { ...child, id: childId };
         }),
       }));
       blocks.push({ ...block, id: blockId, columns: [left, right] });
     } else {
-      blocks.push(blockId === block.id ? block : { ...block, id: blockId });
+      const rich = block.type === "text" ? asRichHtml(block) : block;
+      blocks.push(blockId === rich.id ? rich : { ...rich, id: blockId });
     }
   }
-  const last = footer ?? createFooter();
+  const last = asRichHtml(footer ?? createFooter());
   blocks.push({ ...last, id: unique(last.id) });
   return { version: DESIGN_VERSION, styles: design.styles, blocks };
 }

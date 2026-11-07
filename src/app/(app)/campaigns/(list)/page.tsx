@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { EmailThumbnail } from "@/components/email-editor";
 import { Can } from "@/components/role-context";
 import { ButtonLink } from "@/components/ui/button";
 import { Badge, Card, EmptyState, PageHeader, StatusBadge, Table, TBody, Td, Th } from "@/components/ui/layout";
@@ -18,6 +19,7 @@ import {
   workspaceSort,
   type CampaignTab,
 } from "@/lib/campaigns/workspace";
+import { draftSteps } from "@/lib/campaigns/drafts";
 import { DEFAULT_TIME_ZONE, formatInTimeZone } from "@/lib/schedule";
 import { countRecipients, getCampaignsStats, type CampaignStats } from "@/lib/sending";
 import { formatDateTime, formatNumber, formatPercent } from "@/lib/utils";
@@ -54,6 +56,9 @@ type Row = {
   startedAt: Date | null;
   completedAt: Date | null;
   updatedAt: Date;
+  createdAt: Date | null;
+  /** Only loaded on the Drafts tab (for the thumbnail). */
+  html: string | null;
   totalRecipients: number;
   listIds: string[];
 };
@@ -97,7 +102,16 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Se
     campaigns.distinct("folder", { folder: { $nin: [null, ""] } }),
   ]);
   const counts = Object.fromEntries(CAMPAIGN_TABS.map((t, i) => [t, countList[i]])) as Record<CampaignTab, number>;
-  const tab = params.tab ?? defaultTab(counts);
+  // Without a ?tab=, open where the latest work is (a draft saved after the last send -> Drafts).
+  let latest: Parameters<typeof defaultTab>[1];
+  if (!params.tab && counts.drafts > 0 && counts.sent > 0) {
+    const [lastDraft, lastSent] = await Promise.all([
+      campaigns.findOne(tabFilter("drafts"), { sort: { updatedAt: -1 }, projection: { updatedAt: 1 } }),
+      campaigns.findOne(tabFilter("sent"), { sort: { completedAt: -1, updatedAt: -1 }, projection: { completedAt: 1, updatedAt: 1 } }),
+    ]);
+    latest = { draftSavedAt: lastDraft?.updatedAt ?? null, lastSentAt: lastSent ? (lastSent.completedAt ?? lastSent.updatedAt) : null };
+  }
+  const tab = params.tab ?? defaultTab(counts, latest);
   const folderNames = (folders.filter((f): f is string => typeof f === "string" && f !== "")).sort((a, b) =>
     a.localeCompare(b, "en", { sensitivity: "base" }),
   );
@@ -119,8 +133,10 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Se
         startedAt: 1,
         completedAt: 1,
         updatedAt: 1,
+        createdAt: 1,
         totalRecipients: 1,
         listIds: 1,
+        ...(tab === "drafts" ? { html: 1 } : {}),
       },
     })
     .collation({ locale: "en", strength: 2 })
@@ -141,6 +157,8 @@ export default async function CampaignsPage({ searchParams }: { searchParams: Se
     startedAt: d.startedAt ?? null,
     completedAt: d.completedAt ?? null,
     updatedAt: d.updatedAt,
+    createdAt: d.createdAt ?? null,
+    html: tab === "drafts" ? (d.html ?? "") : null,
     totalRecipients: d.totalRecipients ?? 0,
     listIds: d.listIds ?? [],
   }));
@@ -262,18 +280,26 @@ function CampaignRow({
         />
       </Td>
       <Td className="max-w-md">
-        {/* The link's ::after covers the whole row, so any cell is clickable. */}
-        <Link
-          href={`/campaigns/${row.id}`}
-          className="block truncate font-medium text-slate-900 after:absolute after:inset-0 hover:text-indigo-600 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-indigo-600"
-        >
-          {title || <span className="italic text-slate-500">No subject yet</span>}
-        </Link>
-        <span className="flex items-center gap-2 truncate text-xs text-slate-500">
-          {subjectLine && subjectLine !== title ? <span className="truncate">{subjectLine}</span> : null}
-          {row.folder ? <Badge tone="indigo">{row.folder}</Badge> : null}
-          {row.format === "text" ? <Badge>Plain text</Badge> : null}
-        </span>
+        <div className="flex items-center gap-3">
+          {row.html !== null ? (
+            <EmailThumbnail html={row.html} className="hidden aspect-[4/3] w-20 shrink-0 rounded ring-1 ring-slate-200 sm:block" />
+          ) : null}
+          <div className="min-w-0">
+            {/* The link's ::after covers the whole row, so any cell is clickable. */}
+            <Link
+              href={`/campaigns/${row.id}`}
+              className="block truncate font-medium text-slate-900 after:absolute after:inset-0 hover:text-indigo-600 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-indigo-600"
+            >
+              {title || <span className="italic text-slate-500">No subject yet</span>}
+            </Link>
+            <span className="flex items-center gap-2 truncate text-xs text-slate-500">
+              {subjectLine && subjectLine !== title ? <span className="truncate">{subjectLine}</span> : null}
+              {row.folder ? <Badge tone="indigo">{row.folder}</Badge> : null}
+              {row.format === "text" ? <Badge>Plain text</Badge> : null}
+            </span>
+            {row.html !== null ? <DraftProgress row={row} /> : null}
+          </div>
+        </div>
       </Td>
       {tab === "outbox" || tab === "archived" ? (
         <Td>
@@ -305,7 +331,7 @@ function CampaignRow({
         <div className="relative z-10 inline-flex items-center justify-end gap-1">
           {draft && row.status === "draft" ? (
             <ButtonLink href={`/campaigns/${row.id}`} variant="secondary" size="sm">
-              Edit
+              Continue editing
             </ButtonLink>
           ) : null}
           <Can permission="send">
@@ -351,6 +377,21 @@ function CampaignRow({
         </div>
       </Td>
     </tr>
+  );
+}
+
+/** Drafts: when it was created and which steps are done (Subject, Email, Lists). */
+function DraftProgress({ row }: { row: Row }) {
+  const steps = draftSteps({ subject: row.subject, html: row.html ?? "", listCount: row.listIds.length });
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+      {row.createdAt ? <span>Created {formatDateTime(row.createdAt)}</span> : null}
+      {steps.map((step) => (
+        <span key={step.label} className={step.done ? "text-emerald-700" : "text-slate-400"}>
+          {step.done ? "✓" : "○"} {step.label}
+        </span>
+      ))}
+    </span>
   );
 }
 

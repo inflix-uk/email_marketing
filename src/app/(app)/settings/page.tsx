@@ -105,6 +105,7 @@ export default async function SettingsPage() {
                   initial={{
                     fromName: settings.fromName,
                     fromEmail: settings.fromEmail,
+                    replyTo: settings.replyTo,
                     companyAddress: settings.companyAddress,
                     appUrl,
                   }}

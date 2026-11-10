@@ -168,7 +168,7 @@ describe("replaceBlock / updateStyles", () => {
     const next = replaceBlock(design, { ...design.blocks[1], text: "Changed" } as typeof design.blocks[1]);
     assert.equal(next.blocks[1].type === "text" && next.blocks[1].text, "Changed");
     assert.equal(next.blocks[0], design.blocks[0]);
-    assert.equal(design.blocks[1].type === "text" && design.blocks[1].text, "B");
+    assert.equal(design.blocks[1].type === "text" && design.blocks[1].text, "<p>B</p>");
   });
 
   it("ignores unknown ids and type changes", () => {

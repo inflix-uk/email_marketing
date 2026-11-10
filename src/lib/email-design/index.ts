@@ -23,6 +23,7 @@ export {
   MAX_BLOCKS,
   MAX_COLUMN_BLOCKS,
   SPACER_HEIGHT,
+  TEXT_FORMATS,
   TEXT_SIZES,
   createBlock,
   createFooter,
@@ -49,10 +50,18 @@ export {
   type ImageBlock,
   type SpacerBlock,
   type TextBlock,
+  type TextFormat,
   type TextSize,
 } from "./schema";
 export { renderDesign, type RenderOptions } from "./render";
 export { escapeText, sanitizeImageUrl, sanitizeLinkUrl } from "./rich-text";
+export {
+  hasRichText,
+  markdownToRichHtml,
+  richHtmlParagraphs,
+  richHtmlToPlainText,
+  sanitizeRichHtml,
+} from "./rich-html";
 export {
   addBlock,
   addColumnChild,

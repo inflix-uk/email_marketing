@@ -2,7 +2,8 @@ import type { CollationOptions } from "mongodb";
 import { collections } from "@/db";
 import { fromDoc, type Contact, type ContactStatus, type List, type SendStatus } from "@/db/schema";
 import { chunk } from "./batch";
-import { contactFilter, CONTACTS_PAGE_SIZE, type ContactFilters } from "./filters";
+import { contactFilter, contactSearchFilter, CONTACTS_PAGE_SIZE, type ContactFilters } from "./filters";
+import { cleanSearchTerm, emailPrefixFilter, exactEmailOf, QUICK_SEARCH_LIMIT } from "./search";
 
 // Read-side queries for the contacts & lists pages and the CSV export.
 // Counts, stats and pagination happen in MongoDB (countDocuments /
@@ -132,6 +133,61 @@ export async function getContact(id: string): Promise<Contact | null> {
   return doc ? { ...fromDoc(doc), fields: doc.fields ?? {}, listIds: doc.listIds ?? [], tags: doc.tags ?? [] } : null;
 }
 
+export interface QuickSearchMatch {
+  id: string;
+  email: string;
+  name: string | null;
+  status: ContactStatus;
+  lists: string[];
+}
+
+export interface QuickSearchResult {
+  /** Set when the term is a complete email address of an existing contact. */
+  exactId: string | null;
+  matches: QuickSearchMatch[];
+}
+
+/**
+ * The quick-search dropdown: an exact email first, then email prefix matches
+ * (uses the email index), then "contains" matches on email / names / phone.
+ */
+export async function quickSearchContacts(rawTerm: string, limit = QUICK_SEARCH_LIMIT): Promise<QuickSearchResult> {
+  const term = cleanSearchTerm(rawTerm);
+  if (!term) return { exactId: null, matches: [] };
+  const { contacts } = await collections();
+  const projection = { email: 1, firstName: 1, lastName: 1, status: 1, listIds: 1 } as const;
+
+  const exactEmail = exactEmailOf(term);
+  const exact = exactEmail ? await contacts.findOne({ email: exactEmail }, { projection }) : null;
+  const docs = exact ? [exact] : [];
+
+  const seen = () => docs.map((d) => d._id);
+  if (docs.length < limit) {
+    const prefix = await contacts
+      .find({ ...emailPrefixFilter(term), _id: { $nin: seen() } }, { projection, sort: { email: 1 }, limit: limit - docs.length })
+      .toArray();
+    docs.push(...prefix);
+  }
+  if (docs.length < limit) {
+    const contains = await contacts
+      .find({ $and: [contactSearchFilter(term), { _id: { $nin: seen() } }] }, { projection, limit: limit - docs.length, maxTimeMS: 5000 })
+      .toArray();
+    docs.push(...contains);
+  }
+
+  const names = await listNamesById(docs.flatMap((d) => d.listIds ?? []));
+  return {
+    exactId: exact?._id ?? null,
+    matches: docs.map((d) => ({
+      id: d._id,
+      email: d.email,
+      name: [d.firstName, d.lastName].filter(Boolean).join(" ") || null,
+      status: d.status,
+      lists: (d.listIds ?? []).flatMap((id) => (names.has(id) ? [names.get(id)!] : [])).sort(compareNames),
+    })),
+  };
+}
+
 export async function findContactIdByEmail(email: string): Promise<string | null> {
   const { contacts } = await collections();
   const doc = await contacts.findOne({ email }, { projection: { _id: 1 } });
@@ -188,6 +244,10 @@ export interface ContactActivity {
   openCount: number;
   clickCount: number;
   lastError: string | null;
+  bouncedAt: Date | null;
+  softBouncedAt: Date | null;
+  complainedAt: Date | null;
+  unsubscribedAt: Date | null;
   createdAt: Date;
 }
 
@@ -212,6 +272,10 @@ export async function getContactActivity(contactId: string, limit = 100): Promis
           openCount: 1,
           clickCount: 1,
           lastError: 1,
+          bouncedAt: 1,
+          softBouncedAt: 1,
+          complainedAt: 1,
+          unsubscribedAt: 1,
           createdAt: 1,
         },
       },
@@ -236,6 +300,10 @@ export async function getContactActivity(contactId: string, limit = 100): Promis
             openCount: r.openCount ?? 0,
             clickCount: r.clickCount ?? 0,
             lastError: r.lastError ?? null,
+            bouncedAt: r.bouncedAt ?? null,
+            softBouncedAt: r.softBouncedAt ?? null,
+            complainedAt: r.complainedAt ?? null,
+            unsubscribedAt: r.unsubscribedAt ?? null,
             campaignName,
           },
         ];
@@ -338,3 +406,25 @@ export async function existingListIds(ids: string[]): Promise<string[]> {
   const found = new Set(docs.map((d) => d._id));
   return ids.filter((id) => found.has(id));
 }
+
+/**
+ * Custom field names in use (e.g. ["company", "country"]), for the
+ * "Insert personalisation" menus. Read from the newest contacts only, so it
+ * stays cheap on big databases.
+ */
+export async function contactFieldKeys(sample = 5000, max = 100): Promise<string[]> {
+  const { contacts } = await collections();
+  const keys = await contacts
+    .aggregate<{ _id: string }>([
+      { $sort: { createdAt: -1 } },
+      { $limit: sample },
+      { $project: { _id: 0, keys: { $map: { input: { $objectToArray: { $ifNull: ["$fields", {}] } }, in: "$$this.k" } } } },
+      { $unwind: "$keys" },
+      { $group: { _id: "$keys" } },
+      { $sort: { _id: 1 } },
+      { $limit: max },
+    ])
+    .toArray();
+  return keys.map((k) => k._id).filter((k) => typeof k === "string" && k !== "");
+}
+

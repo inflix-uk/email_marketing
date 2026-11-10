@@ -3,13 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useTransition, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/form";
+import { Select } from "@/components/ui/form";
 import { hasFilters, type ContactFilters } from "@/lib/contacts/filters";
 import type { ListRef } from "@/lib/contacts/queries";
 
 /**
- * Search box + list dropdown for the contacts table. The list applies
- * immediately; the search applies on Enter. Works as a plain GET form without JS.
+ * List dropdown (+ Clear) for the contacts table; the list applies immediately.
+ * The search box is ContactSearch, above the table.
  * Render it with a `key` derived from the filters so it resets on navigation.
  */
 export function ContactFiltersBar({ filters, lists }: { filters: ContactFilters; lists: ListRef[] }) {
@@ -34,21 +34,11 @@ export function ContactFiltersBar({ filters, lists }: { filters: ContactFilters;
     <form
       action="/contacts"
       onSubmit={onSubmit}
-      role="search"
       aria-busy={pending}
       className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
     >
-      <label htmlFor="contact-search" className="sr-only">
-        Search contacts
-      </label>
-      <Input
-        id="contact-search"
-        name="q"
-        type="search"
-        defaultValue={filters.q}
-        placeholder="Search by email or name..."
-        className="sm:w-72"
-      />
+      {/* The search itself is the big box above (ContactSearch); keep it when the list changes. */}
+      {filters.q ? <input type="hidden" name="q" value={filters.q} /> : null}
       {lists.length > 0 ? (
         <>
           <label htmlFor="contact-list" className="sr-only">
@@ -71,11 +61,8 @@ export function ContactFiltersBar({ filters, lists }: { filters: ContactFilters;
         </>
       ) : null}
       <div className="flex items-center gap-2">
-        <Button type="submit" variant="secondary" disabled={pending}>
-          {pending ? "Searching..." : "Search"}
-        </Button>
         {hasFilters(filters) ? (
-          <Button type="button" variant="ghost" onClick={() => startTransition(() => router.push("/contacts"))}>
+          <Button type="button" variant="ghost" disabled={pending} onClick={() => startTransition(() => router.push("/contacts"))}>
             Clear
           </Button>
         ) : null}

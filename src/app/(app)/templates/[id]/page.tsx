@@ -6,6 +6,9 @@ import { SubmitButton } from "@/components/ui/button";
 import { collections } from "@/db";
 import { fromDoc } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
+import { contactFieldKeys } from "@/lib/contacts/queries";
+import { parseCampaignParam } from "@/lib/campaigns/drafts";
+import { findEditableCampaign } from "@/lib/campaigns/draft-store";
 import { can } from "@/lib/permissions";
 import { recentTemplateTests } from "@/lib/sending";
 import { formatDateTime } from "@/lib/utils";
@@ -13,7 +16,11 @@ import { duplicateTemplate } from "../actions";
 import { DeleteTemplateButton } from "../delete-template-button";
 import { TemplateForm } from "./template-form";
 
-type Props = { params: Promise<{ id: string }> };
+type Props = {
+  params: Promise<{ id: string }>;
+  /** ?campaign= : opened from a campaign ("Edit design"); saving updates it and offers the way back. */
+  searchParams: Promise<{ campaign?: string | string[] }>;
+};
 
 const getTemplate = cache(async (id: string) => {
   const { templates } = await collections();
@@ -27,10 +34,21 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: template?.name ?? "Template not found" };
 }
 
-export default async function TemplatePage({ params }: Props) {
-  const { id } = await params;
-  const [template, session, testLog] = await Promise.all([getTemplate(id), requireSession(), recentTemplateTests(id)]);
+export default async function TemplatePage({ params, searchParams }: Props) {
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const campaignId = parseCampaignParam(query.campaign);
+  const [template, session, testLog, campaignDoc, fieldKeys] = await Promise.all([
+    getTemplate(id),
+    requireSession(),
+    recentTemplateTests(id),
+    campaignId ? findEditableCampaign(campaignId) : Promise.resolve(null),
+    contactFieldKeys(),
+  ]);
   if (!template) notFound();
+  const campaign =
+    campaignDoc && can(session.role, "edit")
+      ? { id: campaignDoc._id, name: campaignDoc.subject.trim() || campaignDoc.name || "Untitled campaign" }
+      : null;
   const tests = testLog.map((t) => ({
     id: t._id,
     to: t.to,
@@ -44,11 +62,13 @@ export default async function TemplatePage({ params }: Props) {
   return (
     <>
       <h1 className="sr-only">Edit template</h1>
-      <div className="mb-3 text-sm">
-        <Link href="/templates" className="text-slate-500 hover:text-slate-700">
-          ← Templates
-        </Link>
-      </div>
+      {campaign ? null : (
+        <div className="mb-3 text-sm">
+          <Link href="/templates" className="text-slate-500 hover:text-slate-700">
+            ← Templates
+          </Link>
+        </div>
+      )}
 
       {/* Keyed so switching templates (e.g. after Duplicate) starts with fresh editor state. */}
       <TemplateForm
@@ -61,8 +81,10 @@ export default async function TemplatePage({ params }: Props) {
           html: template.html,
           design: template.design ?? null,
         }}
+        campaign={campaign}
         testRecipient={session.email}
         tests={tests}
+        fieldKeys={fieldKeys}
         secondaryActions={
           can(session.role, "edit") ? (
             <>

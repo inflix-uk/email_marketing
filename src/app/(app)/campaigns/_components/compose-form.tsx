@@ -1,27 +1,53 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useActionState, useEffect, useMemo, useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import {
+  startTransition,
+  useActionState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { EmailPreview, EmailThumbnail } from "@/components/email-editor";
 import { Button } from "@/components/ui/button";
 import { Alert, Input, Select, Textarea } from "@/components/ui/form";
+import { PersonalisationExample, PersonalisationFields, PersonaliseSelect } from "@/components/personalise-select";
 import { Card } from "@/components/ui/layout";
 import type { CampaignFormat } from "@/db/schema";
+import { newTemplateHrefForCampaign, templateHrefForCampaign, worthAutosaving } from "@/lib/campaigns/drafts";
+import { personalisationExample } from "@/lib/personalisation";
 import { htmlToPlainText, isTextVersionStale } from "@/lib/plain-text";
 import { checkSchedule, DEFAULT_TIME_ZONE, formatUtcOffset, zonedLocalToUtc } from "@/lib/schedule";
 import { cn, formatNumber } from "@/lib/utils";
-import { estimateRecipients, submitCampaign, type ActionState, type ComposeNotice } from "../actions";
+import { autosaveCampaign, estimateRecipients, submitCampaign, type ActionState, type ComposeNotice } from "../actions";
 import type { ComposeData } from "../_lib/compose-data";
 import { displaySubject } from "../_lib/display";
 
 const NOTICES: Record<ComposeNotice, { tone: "success" | "error"; text: string }> = {
-  saved: { tone: "success", text: "Draft saved." },
+  saved: { tone: "success", text: "Draft saved. You'll find it under Campaigns → Drafts." },
+  created: { tone: "success", text: "Campaign draft created from your template. It's in Drafts and saves automatically." },
+  "design-saved": { tone: "success", text: "Email design saved to this campaign." },
   "test-sent": { tone: "success", text: "Test email sent." },
   "test-failed": { tone: "error", text: "The test email couldn't be sent. Check Settings → Email sending." },
   scheduled: { tone: "success", text: "Scheduled." },
 };
 
 const PREVIEW_TEXT_MAX = 250;
+
+/** Wait this long after the last change before autosaving a draft. */
+const AUTOSAVE_DELAY_MS = 1500;
+
+type AutosaveStatus =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "saved"; at: Date }
+  | { kind: "error"; message: string };
 
 function people(n: number): string {
   return `${formatNumber(n)} ${n === 1 ? "person" : "people"}`;
@@ -50,7 +76,10 @@ export function ComposeForm({
   defaultTestTo,
   notice,
   typeOptions,
+  autosave = false,
 }: {
+  /** Save quietly while typing (drafts and new campaigns; not scheduled ones). */
+  autosave?: boolean;
   /** Campaign type section (A/B test, auto resend, RSS) - see ./type-options.tsx. */
   typeOptions?: ReactNode;
   campaignId: string | null;
@@ -63,6 +92,8 @@ export function ComposeForm({
   const [intent, setIntent] = useState<string | null>(null);
   const [subject, setSubject] = useState(initial.subject);
   const [previewText, setPreviewText] = useState(initial.previewText);
+  const subjectRef = useRef<HTMLInputElement>(null);
+  const previewTextRef = useRef<HTMLInputElement>(null);
   const [design, setDesign] = useState(data.initialDesign);
   const [listIds, setListIds] = useState<string[]>(data.initialListIds);
   const [recipients, setRecipients] = useState(data.initialRecipients);
@@ -81,6 +112,118 @@ export function ComposeForm({
   useEffect(() => {
     if (!pending) inFlight.current = false;
   }, [pending]);
+
+  // --- Autosave: a draft is saved a moment after each change, so it is never
+  // lost and always shows under Drafts. A new campaign gets its id (and URL) on
+  // the first autosave; explicit buttons then save that same campaign.
+  const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
+  const idRef = useRef<string | null>(campaignId);
+  const [autoStatus, setAutoStatus] = useState<AutosaveStatus>({ kind: "idle" });
+  const [leaving, setLeaving] = useState(false);
+  const autoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirty = useRef(false);
+  const autoRunning = useRef<Promise<boolean> | null>(null);
+
+  const autosaveNow = useCallback(async (): Promise<boolean> => {
+    while (autoRunning.current) await autoRunning.current;
+    if (!autosave || !dirty.current) return false;
+    const form = formRef.current;
+    // An explicit Save / Send / Test is on its way: it saves everything itself.
+    if (!form || inFlight.current) return false;
+    const formData = new FormData(form);
+    if (!worthAutosaving({ subject: String(formData.get("subject") ?? ""), hasDesign: Boolean(formData.get("source")) })) return false;
+    formData.set("intent", "save");
+    dirty.current = false;
+    setAutoStatus({ kind: "saving" });
+    const job = (async () => {
+      try {
+        const result = await autosaveCampaign(idRef.current, formData);
+        if (result.ok && result.id) {
+          if (!idRef.current) {
+            idRef.current = result.id;
+            // The draft has its own page now (Next.js keeps its router in sync).
+            window.history.replaceState(null, "", `/campaigns/${result.id}`);
+          }
+          setAutoStatus({ kind: "saved", at: new Date() });
+          return true;
+        }
+        dirty.current = true;
+        setAutoStatus({ kind: "error", message: result.error ?? "Couldn't save." });
+        return false;
+      } catch {
+        dirty.current = true;
+        setAutoStatus({ kind: "error", message: "Couldn't save. Check your connection." });
+        return false;
+      } finally {
+        autoRunning.current = null;
+      }
+    })();
+    autoRunning.current = job;
+    return job;
+  }, [autosave]);
+
+  // After a Save / Test / Send: done means saved; refused (e.g. Send blocked) means
+  // nothing was written, so autosave what was changed.
+  useEffect(() => {
+    if (pending) return;
+    if (state.ok) dirty.current = false;
+    else if (state.error && dirty.current) void autosaveNow();
+  }, [pending, state, autosaveNow]);
+
+  function cancelAutosaveTimer() {
+    if (autoTimer.current) clearTimeout(autoTimer.current);
+    autoTimer.current = null;
+  }
+
+  function scheduleAutosave() {
+    if (!autosave) return;
+    dirty.current = true;
+    cancelAutosaveTimer();
+    autoTimer.current = setTimeout(() => {
+      autoTimer.current = null;
+      void autosaveNow();
+    }, AUTOSAVE_DELAY_MS);
+  }
+
+  // Save what's pending when the tab is hidden or the page is left; warn on close with unsaved changes.
+  useEffect(() => {
+    if (!autosave) return;
+    const flush = () => {
+      if (!autoTimer.current) return;
+      clearTimeout(autoTimer.current);
+      autoTimer.current = null;
+      void autosaveNow();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (dirty.current || autoRunning.current) event.preventDefault();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      flush();
+    };
+  }, [autosave, autosaveNow]);
+
+  /** Opens the template editor for this campaign: saves first (a new campaign needs its id). */
+  async function openTemplateEditor(href: (id: string) => string) {
+    cancelAutosaveTimer();
+    if (!idRef.current) dirty.current = true;
+    setLeaving(true);
+    await autosaveNow();
+    const id = idRef.current;
+    if (!id) {
+      setLeaving(false);
+      setAutoStatus((s) => (s.kind === "error" ? s : { kind: "error", message: "Add a subject or pick a template first." }));
+      return;
+    }
+    router.push(href(id));
+  }
 
   const current = data.designs.find((d) => d.value === design) ?? data.designs[0];
   const autoText = useMemo(() => (current ? htmlToPlainText(current.html) : ""), [current]);
@@ -134,10 +277,18 @@ export function ComposeForm({
       if (!check.ok) return setClientError(check.error);
     }
     inFlight.current = true;
+    cancelAutosaveTimer();
     setClientError(null);
     setIntent(chosen);
     confirmRef.current?.close();
-    startTransition(() => formAction(formData));
+    // Save the campaign autosave already created, never a second copy.
+    const submit = () => {
+      if (idRef.current) formData.set("campaignId", idRef.current);
+      startTransition(() => formAction(formData));
+    };
+    const running = autoRunning.current;
+    if (running) void running.then(submit, submit);
+    else submit();
   }
 
   const busy = (name: string) => pending && intent === name;
@@ -151,15 +302,20 @@ export function ComposeForm({
     : null;
 
   return (
-    <form onSubmit={handleSubmit} className="grid items-start gap-6 xl:grid-cols-5">
+    <form ref={formRef} onSubmit={handleSubmit} onChange={scheduleAutosave} className="grid items-start gap-6 xl:grid-cols-5">
+      {campaignId === null ? <input type="hidden" name="startedNew" value="1" /> : null}
       <Card className="xl:col-span-3">
         <div className="space-y-6 p-5">
           {/* Subject */}
           <div className="space-y-1.5">
-            <label htmlFor="subject" className="block text-sm font-medium text-slate-900">
-              Subject
-            </label>
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <label htmlFor="subject" className="block text-sm font-medium text-slate-900">
+                Subject
+              </label>
+              <PersonaliseSelect inputRef={subjectRef} fieldKeys={data.fieldKeys} aria-label="Insert personalisation into the subject" />
+            </div>
             <Input
+              ref={subjectRef}
               id="subject"
               name="subject"
               value={subject}
@@ -169,21 +325,29 @@ export function ComposeForm({
               placeholder="What's this email about?"
               aria-invalid={fieldError("subject") ? true : undefined}
             />
-            {fieldError("subject") ? <p className="text-xs text-red-600">{fieldError("subject")}</p> : null}
+            {fieldError("subject") ? (
+              <p className="text-xs text-red-600">{fieldError("subject")}</p>
+            ) : (
+              <PersonalisationExample text={subject} />
+            )}
           </div>
 
           {/* Preview text (preheader) */}
           {format === "html" ? (
             <div className="space-y-1.5">
-              <div className="flex items-baseline justify-between gap-2">
+              <div className="flex flex-wrap items-end justify-between gap-2">
                 <label htmlFor="previewText" className="block text-sm font-medium text-slate-900">
                   Preview text <span className="font-normal text-slate-500">(optional)</span>
                 </label>
-                <span className={cn("text-xs tabular-nums", previewText.length > 150 ? "text-amber-600" : "text-slate-400")}>
-                  {previewText.length}/{PREVIEW_TEXT_MAX}
+                <span className="flex items-center gap-3">
+                  <span className={cn("text-xs tabular-nums", previewText.length > 150 ? "text-amber-600" : "text-slate-400")}>
+                    {previewText.length}/{PREVIEW_TEXT_MAX}
+                  </span>
+                  <PersonaliseSelect inputRef={previewTextRef} fieldKeys={data.fieldKeys} aria-label="Insert personalisation into the preview text" />
                 </span>
               </div>
               <Input
+                ref={previewTextRef}
                 id="previewText"
                 name="previewText"
                 value={previewText}
@@ -195,7 +359,10 @@ export function ComposeForm({
               {fieldError("previewText") ? (
                 <p className="text-xs text-red-600">{fieldError("previewText")}</p>
               ) : (
-                <p className="text-xs text-slate-500">Keep it short: 40 to 130 characters show best.</p>
+                <>
+                  <PersonalisationExample text={previewText} />
+                  <p className="text-xs text-slate-500">Keep it short: 40 to 130 characters show best.</p>
+                </>
               )}
             </div>
           ) : (
@@ -208,15 +375,31 @@ export function ComposeForm({
               <legend className="text-sm font-medium text-slate-900">Template</legend>
               <span className="flex gap-4 text-sm">
                 {current?.templateId ? (
-                  <Link href={`/templates/${current.templateId}`} className="font-medium text-indigo-600 hover:text-indigo-500">
-                    Edit this template
-                  </Link>
+                  <button
+                    type="button"
+                    disabled={leaving || pending}
+                    onClick={() => {
+                      const templateId = current.templateId;
+                      if (templateId) void openTemplateEditor((id) => templateHrefForCampaign(templateId, id));
+                    }}
+                    className="font-medium text-indigo-600 hover:text-indigo-500 disabled:opacity-60"
+                  >
+                    {leaving ? "Opening..." : "Edit design"}
+                  </button>
                 ) : null}
-                <Link href="/templates/new" className="font-medium text-indigo-600 hover:text-indigo-500">
+                <button
+                  type="button"
+                  disabled={leaving || pending}
+                  onClick={() => void openTemplateEditor(newTemplateHrefForCampaign)}
+                  className="font-medium text-indigo-600 hover:text-indigo-500 disabled:opacity-60"
+                >
                   New template
-                </Link>
+                </button>
               </span>
             </div>
+            <p className="text-xs text-slate-500">
+              The email comes from the template. Edit design opens it; saving there brings the changes back to this campaign.
+            </p>
             {fieldError("source") ? <p className="text-xs text-red-600">{fieldError("source")}</p> : null}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {data.designs.map((option) => {
@@ -373,6 +556,7 @@ export function ComposeForm({
                       onClick={() => {
                         setTextBody("");
                         setTextTouched(true);
+                        scheduleAutosave();
                       }}
                     >
                       Use automatic text
@@ -403,7 +587,7 @@ export function ComposeForm({
             </div>
           </details>
 
-          {typeOptions}
+          <PersonalisationFields value={data.fieldKeys}>{typeOptions}</PersonalisationFields>
         </div>
 
         {/* Actions */}
@@ -423,6 +607,7 @@ export function ComposeForm({
             <Button type="button" variant="ghost" disabled={pending} onClick={() => setShowSchedule((v) => !v)}>
               {initial.scheduledLocal ? "Change time" : "Schedule"}
             </Button>
+            {autosave ? <AutosaveIndicator status={autoStatus} /> : null}
             <span className="ml-auto flex items-center gap-2">
               <span className="w-56">
                 <Input name="testTo" inputMode="email" defaultValue={defaultTestTo} aria-label="Send a test to" />
@@ -493,8 +678,13 @@ export function ComposeForm({
       <aside aria-label="Preview" className="xl:sticky xl:top-6 xl:col-span-2">
         <Card className="overflow-hidden">
           <div className="border-b border-slate-200 px-4 py-2.5 text-sm">
-            <p className="truncate font-medium text-slate-900">{displaySubject(subject) || <span className="text-slate-400">No subject yet</span>}</p>
-            {format === "html" && previewText.trim() ? <p className="truncate text-xs text-slate-500">{previewText}</p> : null}
+            {/* As an example contact sees it (merge tags filled in). */}
+            <p className="truncate font-medium text-slate-900">
+              {(personalisationExample(subject)?.filled ?? subject.trim()) || <span className="text-slate-400">No subject yet</span>}
+            </p>
+            {format === "html" && previewText.trim() ? (
+              <p className="truncate text-xs text-slate-500">{personalisationExample(previewText)?.filled ?? previewText}</p>
+            ) : null}
           </div>
           {format === "text" ? (
             <pre className="h-[620px] overflow-auto whitespace-pre-wrap p-4 font-mono text-xs text-slate-800">{textBody.trim() || autoText}</pre>
@@ -505,4 +695,30 @@ export function ComposeForm({
       </aside>
     </form>
   );
+}
+
+/** "Saving... / Saved / Couldn't save" next to the buttons. */
+function AutosaveIndicator({ status }: { status: AutosaveStatus }) {
+  if (status.kind === "saving") {
+    return (
+      <span className="text-sm text-slate-500" role="status">
+        Saving...
+      </span>
+    );
+  }
+  if (status.kind === "saved") {
+    return (
+      <span className="text-sm text-emerald-700" role="status">
+        Saved {status.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+      </span>
+    );
+  }
+  if (status.kind === "error") {
+    return (
+      <span className="text-sm text-red-600" role="status" title={status.message}>
+        Couldn&apos;t save: {status.message}
+      </span>
+    );
+  }
+  return <span className="text-sm text-slate-400">Saves automatically</span>;
 }

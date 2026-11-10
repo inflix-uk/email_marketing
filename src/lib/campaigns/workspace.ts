@@ -94,8 +94,18 @@ export function dateSortLabel(tab: CampaignTab): string {
   return tab === "sent" ? "Sent date" : tab === "outbox" ? "Send time" : "Last saved";
 }
 
-/** Default tab: Sent when there is anything sent, else whichever tab has campaigns. */
-export function defaultTab(counts: Record<CampaignTab, number>): CampaignTab {
+/**
+ * Default tab: Sent when there is anything sent, else whichever tab has
+ * campaigns. A draft saved after the last send wins, so the campaign you were
+ * just working on is what you see when you come back to Campaigns.
+ */
+export function defaultTab(
+  counts: Record<CampaignTab, number>,
+  latest?: { draftSavedAt: Date | null; lastSentAt: Date | null },
+): CampaignTab {
+  if (counts.drafts > 0 && latest?.draftSavedAt && (!latest.lastSentAt || latest.draftSavedAt > latest.lastSentAt)) {
+    return "drafts";
+  }
   return (["sent", "drafts", "outbox"] as const).find((t) => counts[t] > 0) ?? "sent";
 }
 

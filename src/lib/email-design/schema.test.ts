@@ -54,7 +54,7 @@ describe("parseDesign", () => {
     assert.ok(partial);
     assert.equal(partial.styles.accentColor, "#ff0000");
     assert.equal(partial.styles.contentWidth, 600);
-    assert.deepEqual(partial.blocks[0], { id: "t", type: "text", text: "", align: "left", size: "normal", color: null });
+    assert.deepEqual(partial.blocks[0], { id: "t", type: "text", text: "", format: "html", align: "left", size: "normal", color: null });
     assert.equal(partial.blocks.at(-1)?.type, "footer");
   });
 

@@ -86,6 +86,33 @@ export function renderMergeTags(
   });
 }
 
+/**
+ * Make text safe for a one-line email header (subject) or the hidden preview
+ * text: control characters (CR, LF, tab, NUL...) and Unicode line/paragraph
+ * separators become spaces, runs of whitespace collapse, ends are trimmed.
+ * A contact whose name contains "\r\nBcc: ..." can't inject a header.
+ */
+export function oneLine(value: string): string {
+  // Control characters first; \s then also covers the Unicode line/paragraph separators.
+  return value.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The subject line one contact gets: merge tags filled in (fallbacks used for
+ * empty values), not HTML-escaped (it's a header; the mailer encodes it), on one line.
+ */
+export function renderSubject(subject: string, data: MergeData): string {
+  return oneLine(renderMergeTags(subject, data));
+}
+
+/**
+ * The preview text (preheader) one contact gets, as HTML: the merged values are
+ * escaped (it goes into the email body), and it is kept on one line.
+ */
+export function renderPreviewText(previewText: string, data: MergeData): string {
+  return oneLine(renderMergeTags(previewText, data, { escape: true }));
+}
+
 /** Unique tag names used in a template (without braces). */
 export function extractMergeTags(input: string): string[] {
   const found = new Set<string>();

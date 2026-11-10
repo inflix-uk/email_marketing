@@ -1,5 +1,6 @@
 import type { Filter } from "mongodb";
 import { CONTACT_STATUSES, type ContactDoc, type ContactStatus } from "@/db/schema";
+import { escapeRegex, phoneClauses } from "./search";
 import { MAX_TAG_LENGTH, normalizeTag } from "./tags";
 
 // Filters shared by the contacts table, its pagination, bulk actions and the
@@ -73,12 +74,12 @@ export function filtersToSearchParams(f: ContactFilters, page?: number): URLSear
   return params;
 }
 
-/** Escape regex metacharacters so user input matches literally in `$regex`. */
-export function escapeRegex(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+export { escapeRegex };
 
-/** Case-insensitive "contains" match on email, first name, last name, or "first last". */
+/**
+ * Case-insensitive "contains" match on email, first name, last name, or
+ * "first last"; a phone-like term also matches phone custom fields.
+ */
 export function contactSearchFilter(term: string): Filter<ContactDoc> {
   const pattern = escapeRegex(term);
   const contains = { $regex: pattern, $options: "i" };
@@ -96,6 +97,7 @@ export function contactSearchFilter(term: string): Filter<ContactDoc> {
       },
     });
   }
+  clauses.push(...phoneClauses(term));
   return { $or: clauses };
 }
 

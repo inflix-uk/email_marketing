@@ -1,13 +1,14 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ALIGNMENTS, normalizeHexColor, sanitizeLinkUrl, type Align } from "@/lib/email-design";
 import { cn } from "@/lib/utils";
 import { Select } from "@/components/ui/select";
 import { applyEditToElement } from "./apply-edit";
 import { Segmented, SegmentButton } from "./controls";
 import { InsertVariableMenu } from "./insert-variable-menu";
-import { insertLink, insertText, toggleWrap, type TextEdit } from "./text-edit";
+import { RichTextEditor } from "./rich-text-editor";
+import { insertText, type TextEdit } from "./text-edit";
 
 // Form controls for the visual editor's side panel. All of them are
 // controlled by the design state, so nothing typed is lost on re-render.
@@ -170,29 +171,10 @@ export function UrlField({
   );
 }
 
-function ToolButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className="inline-flex h-6 min-w-6 items-center justify-center rounded px-1.5 text-xs text-slate-600 hover:bg-slate-200/70 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600"
-    >
-      {children}
-    </button>
-  );
-}
-
-/** Multi-line "simple rich text": bold, italic, links, line breaks and variables. */
+/**
+ * Formatted text, edited in place: select text for Bold / Italic /
+ * Underline / Link; the value is the sanitised rich HTML (rich-html.ts).
+ */
 export function RichTextField({
   id,
   label,
@@ -208,55 +190,26 @@ export function RichTextField({
   rows?: number;
   placeholder?: string;
 }) {
-  const { ref, remember, edit } = useCaret<HTMLTextAreaElement>();
-  const bold = () => edit((v, start, end) => toggleWrap(v, start, end, "**", "bold text"));
-  const italic = () => edit((v, start, end) => toggleWrap(v, start, end, "*", "italic text"));
-  const link = () => edit((v, start, end) => insertLink(v, start, end));
-
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
-    const action = { b: bold, i: italic, k: link }[event.key.toLowerCase()];
-    if (action) {
-      event.preventDefault();
-      action();
-    }
-  }
-
+  const insertRef = useRef<((text: string) => void) | null>(null);
+  const labelId = `${id}-label`;
   return (
-    <FieldRow label={label} htmlFor={id}>
-      <div className="rounded-md bg-white shadow-sm ring-1 ring-slate-300 ring-inset focus-within:ring-2 focus-within:ring-indigo-600">
-        <div
-          role="toolbar"
-          aria-label={`${label} formatting`}
-          className="flex items-center gap-0.5 border-b border-slate-200 px-1.5 py-1"
-        >
-          <ToolButton label="Bold (Ctrl+B)" onClick={bold}>
-            <span className="font-bold">B</span>
-          </ToolButton>
-          <ToolButton label="Italic (Ctrl+I)" onClick={italic}>
-            <span className="font-serif italic">I</span>
-          </ToolButton>
-          <ToolButton label="Link (Ctrl+K)" onClick={link}>
-            <span className="underline">Link</span>
-          </ToolButton>
-          <div className="ml-auto">
-            <InsertVariableMenu compact onInsert={(tag) => edit((_value, start, end) => insertText(start, end, tag))} />
-          </div>
-        </div>
-        <textarea
-          ref={ref}
-          id={id}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={remember}
-          onKeyDown={onKeyDown}
-          rows={rows}
-          maxLength={20000}
-          placeholder={placeholder}
-          className="block w-full resize-y rounded-b-md border-0 bg-transparent px-2.5 py-2 text-sm leading-5 text-slate-900 placeholder:text-slate-400 focus:ring-0 focus:outline-none"
-        />
+    <div className="space-y-1">
+      <div className="flex min-h-6 items-center justify-between gap-2">
+        <span id={labelId} className={labelClass}>
+          {label}
+        </span>
+        <InsertVariableMenu compact onInsert={(tag) => insertRef.current?.(tag)} />
       </div>
-    </FieldRow>
+      <RichTextEditor
+        id={id}
+        labelId={labelId}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        minLines={rows}
+        insertRef={insertRef}
+      />
+    </div>
   );
 }
 

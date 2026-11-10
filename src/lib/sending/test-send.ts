@@ -50,6 +50,8 @@ export async function sendTestEmail(input: EmailContent, to: string[]): Promise<
     const msg = buildEmail(input, contact, { sendId: null, unsubscribeUrl, companyAddress: settings.companyAddress });
     msg.to = address;
     msg.subject = `[Test] ${msg.subject}`;
+    // Like a real send (inbox filters and checkers score this header); the preview link unsubscribes nobody.
+    msg.headers = { ...msg.headers, "List-Unsubscribe": `<${unsubscribeUrl}>` };
     try {
       await sendEmail(msg);
     } catch (err) {

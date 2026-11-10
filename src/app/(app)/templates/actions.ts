@@ -7,6 +7,8 @@ import { collections } from "@/db";
 import { newId, type TemplateDoc } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requirePermission } from "@/lib/auth";
+import { parseCampaignParam, templateHrefForCampaign } from "@/lib/campaigns/drafts";
+import { applyTemplateToCampaign, createDraftFromTemplate } from "@/lib/campaigns/draft-store";
 import { parseDesign, renderDesign, serializeDesign } from "@/lib/email-design";
 import { BLANK_STARTER, BLANK_VISUAL_STARTER, findStarter } from "@/lib/templates/starters";
 
@@ -53,6 +55,25 @@ function templatePaths(id?: string) {
   if (id) revalidatePath(`/templates/${id}`);
 }
 
+/**
+ * Where a new template opens. Started from a campaign ("New template" there),
+ * the campaign uses it straight away and the editor links back to it.
+ */
+async function templateEditorPath(templateId: string, formData: FormData): Promise<string> {
+  const campaignId = parseCampaignParam(text(formData, "campaignId"));
+  if (!campaignId) return `/templates/${templateId}`;
+  if (await applyTemplateToCampaign(templateId, campaignId)) revalidatePath("/campaigns", "layout");
+  return templateHrefForCampaign(templateId, campaignId);
+}
+
+/** "Use in campaign": a campaign draft made from the template, opened straight away (it is in Drafts already). */
+async function openNewDraft(templateId: string): Promise<never> {
+  const campaignId = await createDraftFromTemplate(templateId);
+  if (!campaignId) redirect("/templates");
+  revalidatePath("/campaigns", "layout");
+  redirect(`/campaigns/${campaignId}?notice=created`);
+}
+
 // ---------------------------------------------------------------------------
 // Create (one click on a starter card on /templates/new)
 // ---------------------------------------------------------------------------
@@ -80,7 +101,7 @@ export async function createTemplate(formData: FormData): Promise<void> {
   await templates.insertOne(created);
 
   templatePaths();
-  redirect(`/templates/${created._id}`);
+  redirect(await templateEditorPath(created._id, formData));
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +149,11 @@ export async function createTemplateFromHtml(_prev: PasteHtmlState, formData: Fo
   await templates.insertOne(created);
 
   templatePaths();
-  redirect(`/templates/${created._id}`);
+  // "Create and use in campaign" (not when the template was started from a campaign: it goes back there).
+  if (text(formData, "then") === "campaign" && !parseCampaignParam(text(formData, "campaignId"))) {
+    await openNewDraft(created._id);
+  }
+  redirect(await templateEditorPath(created._id, formData));
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +164,8 @@ export type TemplateField = "name" | "subject" | "previewText" | "html" | "desig
 
 export interface SaveTemplateState {
   ok?: boolean;
+  /** Saved, but something needs attention (e.g. the campaign couldn't be updated). */
+  warning?: string;
   error?: string;
   fieldErrors?: Partial<Record<TemplateField, string[]>>;
 }
@@ -155,8 +182,9 @@ const saveSchema = z.object({
 });
 
 /**
- * Saves the template. When the form was submitted with the
- * `then=campaign` button, continues to a new campaign using it.
+ * Saves the template. Opened from a campaign (`campaignId`), the campaign's
+ * content is updated too, and `then=back` returns to it. Otherwise the
+ * `then=campaign` button continues to a new campaign draft using it.
  */
 export async function saveTemplate(_prev: SaveTemplateState, formData: FormData): Promise<SaveTemplateState> {
   await requirePermission("edit");
@@ -212,7 +240,18 @@ export async function saveTemplate(_prev: SaveTemplateState, formData: FormData)
   }
 
   templatePaths(id);
-  if (text(formData, "then") === "campaign") redirect(`/campaigns/new?template=${encodeURIComponent(id)}`);
+  const then = text(formData, "then");
+  const campaignId = parseCampaignParam(text(formData, "campaignId"));
+  if (campaignId) {
+    const applied = await applyTemplateToCampaign(id, campaignId);
+    revalidatePath("/campaigns", "layout");
+    if (!applied) {
+      return { ok: true, warning: "The template was saved, but the campaign is no longer a draft, so it wasn't changed." };
+    }
+    if (then === "back") redirect(`/campaigns/${campaignId}?notice=design-saved`);
+    return { ok: true };
+  }
+  if (then === "campaign") await openNewDraft(id);
   return { ok: true };
 }
 

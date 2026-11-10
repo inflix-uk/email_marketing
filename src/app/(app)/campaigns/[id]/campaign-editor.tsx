@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageHeader, StatusBadge } from "@/components/ui/layout";
 import type { Campaign } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
+import { workspaceHref } from "@/lib/campaigns/workspace";
 import { DEFAULT_TIME_ZONE, formatInTimeZone, utcToZonedLocal } from "@/lib/schedule";
 import { deleteCampaign, unscheduleCampaign, type ComposeNotice } from "../actions";
 import { ActionButton, ConfirmButton } from "../_components/action-buttons";
@@ -12,11 +13,13 @@ import { can } from "@/lib/permissions";
 import { getComposeData } from "../_lib/compose-data";
 import { displaySubject } from "../_lib/display";
 
-const NOTICES: ComposeNotice[] = ["saved", "test-sent", "test-failed", "scheduled"];
+const NOTICES: ComposeNotice[] = ["saved", "created", "design-saved", "test-sent", "test-failed", "scheduled"];
 
 /** /campaigns/[id] for draft and scheduled campaigns. */
 export async function CampaignEditor({ campaign, notice }: { campaign: Campaign; notice?: string }) {
   const [session, data] = await Promise.all([requireSession(), getComposeData(campaign)]);
+  // Back to the tab this campaign is listed on.
+  const backHref = workspaceHref({ tab: campaign.status === "scheduled" ? "outbox" : campaign.archivedAt ? "archived" : "drafts" });
   // Older scheduled campaigns only stored the UTC time: show it in the default timezone.
   const scheduledTimeZone = campaign.scheduledAt ? (campaign.scheduledTimeZone ?? DEFAULT_TIME_ZONE) : null;
   const scheduledLocal =
@@ -30,7 +33,7 @@ export async function CampaignEditor({ campaign, notice }: { campaign: Campaign;
       <>
         <PageHeader
           back={
-            <Link href="/campaigns" className="font-medium text-slate-500 hover:text-slate-700">
+            <Link href={backHref} className="font-medium text-slate-500 hover:text-slate-700">
               &larr; Campaigns
             </Link>
           }
@@ -53,7 +56,7 @@ export async function CampaignEditor({ campaign, notice }: { campaign: Campaign;
     <>
       <PageHeader
         back={
-          <Link href="/campaigns" className="font-medium text-slate-500 hover:text-slate-700">
+          <Link href={backHref} className="font-medium text-slate-500 hover:text-slate-700">
             &larr; Campaigns
           </Link>
         }
@@ -104,6 +107,7 @@ export async function CampaignEditor({ campaign, notice }: { campaign: Campaign;
         defaultTestTo={session.email}
         notice={NOTICES.find((n) => n === notice)}
         typeOptions={<CampaignTypeSection campaign={campaign} designs={data.designs} />}
+        autosave={campaign.status === "draft"}
       />
     </>
   );

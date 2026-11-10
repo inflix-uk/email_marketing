@@ -34,6 +34,14 @@ describe("sanitizeLinkUrl", () => {
     assert.equal(sanitizeLinkUrl("hi@example.com"), "mailto:hi@example.com");
   });
 
+  it("keeps phone links and encodes apostrophes", () => {
+    assert.equal(sanitizeLinkUrl("tel:+441234567890"), "tel:+441234567890");
+    assert.equal(sanitizeLinkUrl("tel:+44 20 1234 5678"), "tel:+442012345678");
+    assert.equal(sanitizeLinkUrl("tel:call-me"), "");
+    assert.equal(sanitizeLinkUrl("tel:123;alert(1)"), "");
+    assert.equal(sanitizeLinkUrl("https://example.com/o'brien"), "https://example.com/o%27brien");
+  });
+
   it("allows the unsubscribe tag on its own and tags inside http(s) links", () => {
     assert.equal(sanitizeLinkUrl("{{ unsubscribe_url }}"), "{{unsubscribe_url}}");
     assert.equal(sanitizeLinkUrl("https://example.com/?n={{first_name | you there}}"), "https://example.com/?n={{first_name | you there}}");
@@ -49,7 +57,6 @@ describe("sanitizeLinkUrl", () => {
       "java\tscript:alert(1)",
       "data:text/html,<script>alert(1)</script>",
       "vbscript:x",
-      "tel:+441234567890",
       "ftp://example.com",
       "//example.com",
       "/relative/path",

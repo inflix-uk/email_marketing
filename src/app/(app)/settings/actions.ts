@@ -167,6 +167,8 @@ export async function saveEmailSending(_prev: SettingsFormState, formData: FormD
 const senderSchema = z.object({
   fromName: z.string().trim().min(1, "Enter a sender name").max(100, "Keep the name under 100 characters"),
   fromEmail: email("Enter the email address you send from"),
+  // Empty = replies go to the From email.
+  replyTo: z.union([z.literal(""), email("Enter a valid reply-to address, or leave it empty")]),
   companyAddress: z.string().trim().max(500, "Keep the address under 500 characters"),
   appUrl: z
     .string()
@@ -190,7 +192,9 @@ export async function saveSender(_prev: SettingsFormState, formData: FormData): 
   const session = await requirePermission("settings");
   const parsed = senderSchema.safeParse(fields(formData));
   if (!parsed.success) return invalid(parsed.error);
-  await updateSettings(parsed.data); // reply-to is not on the page and stays as stored
+  const { replyTo, ...rest } = parsed.data;
+  // A reply-to equal to the From email adds nothing: store it as empty.
+  await updateSettings({ ...rest, replyTo: replyTo === rest.fromEmail ? "" : replyTo });
   await audit(session, "settings.sender", { type: "settings", id: "app", details: parsed.data });
   return saved();
 }

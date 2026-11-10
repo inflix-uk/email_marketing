@@ -13,6 +13,7 @@ import { contentFingerprint } from "@/lib/plain-text";
 import { checkSchedule } from "@/lib/schedule";
 import { parseCampaignTypeFields, runCampaignTypeIntent } from "@/lib/campaign-types/form";
 import { getSettings } from "@/lib/settings";
+import { senderFromSettings } from "@/lib/sending/sender";
 import {
   CampaignError,
   cancelCampaign,
@@ -332,7 +333,10 @@ async function saveCompose(
   if (!typed.ok) return { error: typed.error, fieldErrors: typed.fieldErrors };
 
   const settings = await getSettings();
-  const replyTo = parsed.data.replyTo || settings.replyTo.trim() || null;
+  // A reply-to that only followed the old sender follows Settings again (src/lib/sending/sender.ts).
+  const replyTo =
+    senderFromSettings({ fromEmail: existing?.fromEmail, replyTo: parsed.data.replyTo }, settings)?.replyTo ??
+    (parsed.data.replyTo || settings.replyTo.trim() || null);
   if (intent === "send" || intent === "schedule") {
     const blockers = sendBlockers({
       subject,

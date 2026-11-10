@@ -190,7 +190,7 @@ export function SenderForm({
   initial,
   appUrlSaved,
 }: {
-  initial: { fromName: string; fromEmail: string; companyAddress: string; appUrl: string };
+  initial: { fromName: string; fromEmail: string; replyTo: string; companyAddress: string; appUrl: string };
   /** false = the website address is a suggestion from this page's address, not stored yet. */
   appUrlSaved: boolean;
 }) {
@@ -210,6 +210,15 @@ export function SenderForm({
             placeholder="news@yourdomain.com"
             required
           />
+        </Field>
+        <Field
+          label="Reply-to email"
+          htmlFor="reply-to"
+          error={errors.replyTo}
+          hint="Where replies go. Leave empty to use the From email."
+          className="sm:col-span-2"
+        >
+          <Input id="reply-to" name="replyTo" type="email" defaultValue={initial.replyTo} placeholder="Same as From email" />
         </Field>
         <Field
           label="Company address"

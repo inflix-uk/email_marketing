@@ -8,10 +8,12 @@ import type { Filter } from "mongodb";
 import { collections, isDuplicateKeyError } from "@/db";
 import { newId, type CampaignDoc, type CampaignStatus, type SendDoc } from "@/db/schema";
 import { campaignTypeProblems, campaignTypeStartFields, createTypeAllocator } from "@/lib/campaign-types/hooks";
+import { getSettings } from "@/lib/settings";
 import { isValidEmail } from "@/lib/utils";
 import { abHoldbackMs, createAbAssigner, hasAbTest } from "./ab";
 import { CampaignError } from "./errors";
 import { audienceRecipientsFilter, countRecipients } from "./recipients";
+import { senderFromSettings } from "./sender";
 
 /** Sends inserted per insertMany call while building the queue. */
 const INSERT_CHUNK = 1000;
@@ -121,6 +123,7 @@ export function queueLockFree(now: Date = new Date()): Filter<CampaignDoc> {
  *    never sees a half-built queue.
  */
 export async function queueCampaign(campaignId: string): Promise<{ queued: number }> {
+  await applySettingsSender(campaignId);
   const problems = await getCampaignProblems(campaignId);
   if (problems.length > 0) throw new CampaignError(problemsMessage(problems), "problems");
 
@@ -372,5 +375,26 @@ async function skipQueuedSends(campaignId: string, reason: string, now: Date): P
   await sends.updateMany(
     { campaignId, status: "queued" },
     { $set: { status: "skipped", lastError: reason, updatedAt: now } },
+  );
+}
+
+/**
+ * The sender comes from Settings: bring a draft/scheduled campaign's copy up
+ * to date just before it is queued, so changing the sender in Settings also
+ * applies to campaigns saved (or scheduled) before the change.
+ */
+export async function applySettingsSender(campaignId: string): Promise<void> {
+  const { campaigns } = await collections();
+  const campaign = await campaigns.findOne(
+    { _id: campaignId, status: { $in: ["draft", "scheduled"] } },
+    { projection: { fromName: 1, fromEmail: 1, replyTo: 1 } },
+  );
+  if (!campaign) return;
+  const sender = senderFromSettings(campaign, await getSettings());
+  if (!sender) return;
+  if (sender.fromName === campaign.fromName && sender.fromEmail === campaign.fromEmail && sender.replyTo === (campaign.replyTo ?? null)) return;
+  await campaigns.updateOne(
+    { _id: campaignId, status: { $in: ["draft", "scheduled"] } },
+    { $set: { ...sender, updatedAt: new Date() } },
   );
 }

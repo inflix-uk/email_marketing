@@ -647,14 +647,14 @@ export async function moveCampaign(campaignId: string, _prev: ActionState, formD
 
 const MAX_BULK = 100;
 const bulkSchema = z.object({
-  intent: z.enum(["duplicate", "archive", "restore", "move"]),
+  intent: z.enum(["duplicate", "archive", "restore", "move", "delete"]),
   ids: z.array(idSchema).min(1, "Select at least one campaign.").max(MAX_BULK, `Select at most ${MAX_BULK} campaigns.`),
   folder: z.string().max(200),
 });
 
 /** Bulk actions for the campaigns selected on the list page. */
 export async function bulkCampaigns(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  await requirePermission("edit");
+  const session = await requirePermission(text(formData, "intent") === "delete" ? "delete" : "edit");
   const parsed = bulkSchema.safeParse({
     intent: text(formData, "intent"),
     ids: [...new Set(formData.getAll("ids").filter((v): v is string => typeof v === "string"))],
@@ -686,6 +686,15 @@ export async function bulkCampaigns(_prev: ActionState, formData: FormData): Pro
       message: `Archived ${plural(result.matchedCount)}.${skipped ? ` ${plural(skipped)} in the outbox ${skipped === 1 ? "was" : "were"} skipped.` : ""}`,
     };
   }
+  if (intent === "delete") {
+    const count = await removeCampaigns(session, ids);
+    const skipped = ids.length - count;
+    if (count === 0) return { error: "Nothing was deleted. Stop or unschedule campaigns in the outbox first." };
+    return {
+      ok: true,
+      message: `Deleted ${plural(count)}.${skipped ? ` ${plural(skipped)} in the outbox ${skipped === 1 ? "was" : "were"} skipped.` : ""}`,
+    };
+  }
   if (intent === "restore") {
     const result = await campaigns.updateMany({ _id: { $in: ids } }, { $set: { archivedAt: null, updatedAt: now } });
     revalidateCampaigns();
@@ -700,27 +709,53 @@ export async function bulkCampaigns(_prev: ActionState, formData: FormData): Pro
   };
 }
 
+// Drafts and finished campaigns can go; anything scheduled or sending must be stopped first.
+const DELETABLE_STATUSES: CampaignStatus[] = ["draft", "sent", "cancelled"];
+const NOT_DELETABLE = "Stop or unschedule this campaign before deleting it.";
+
+/**
+ * Deletes the given campaigns that are deletable right now (each one an atomic
+ * claim on its status, so a campaign that starts sending meanwhile is skipped),
+ * with their sends, clicks and opens. Contacts, and their unsubscribes, are untouched.
+ */
+async function removeCampaigns(session: Awaited<ReturnType<typeof requirePermission>>, ids: string[]): Promise<number> {
+  const { campaigns, sends, clicks, opens } = await collections();
+  const deleted: Campaign[] = [];
+  for (const id of ids) {
+    const doc = await campaigns.findOneAndDelete({ _id: id, status: { $in: DELETABLE_STATUSES }, ...notQueueing() });
+    if (doc) deleted.push(fromDoc(doc));
+  }
+  if (deleted.length === 0) return 0;
+
+  const deletedIds = deleted.map((c) => c.id);
+  await Promise.all([
+    sends.deleteMany({ campaignId: { $in: deletedIds } }),
+    clicks.deleteMany({ campaignId: { $in: deletedIds } }),
+    opens.deleteMany({ campaignId: { $in: deletedIds } }),
+  ]);
+  for (const campaign of deleted) {
+    await audit(session, "campaign.delete", { type: "campaign", id: campaign.id, details: { subject: campaign.subject, status: campaign.status } });
+  }
+  revalidateCampaigns();
+  return deleted.length;
+}
+
+/** Delete from the campaign's own page, then go back to the list. */
 export async function deleteCampaign(campaignId: string): Promise<ActionState> {
   const session = await requirePermission("delete");
   const campaign = await findCampaign(campaignId);
   if (!campaign) return NOT_FOUND;
-  // Drafts and finished campaigns can go; anything scheduled or sending must be stopped first.
-  const deletable: CampaignStatus[] = ["draft", "sent", "cancelled"];
-  if (!deletable.includes(campaign.status)) {
-    return { error: "Stop or unschedule this campaign before deleting it." };
-  }
-
-  const { campaigns, sends, clicks, opens } = await collections();
-  const result = await campaigns.deleteOne({ _id: campaign.id, status: { $in: deletable }, ...notQueueing() });
-  if (result.deletedCount === 0) return { error: "This campaign can't be deleted right now." };
-  // Its sends and clicks (the stats) go with it. Contacts, and their unsubscribes, are untouched.
-  await Promise.all([
-    sends.deleteMany({ campaignId: campaign.id }),
-    clicks.deleteMany({ campaignId: campaign.id }),
-    opens.deleteMany({ campaignId: campaign.id }),
-  ]);
-  await audit(session, "campaign.delete", { type: "campaign", id: campaign.id, details: { subject: campaign.subject, status: campaign.status } });
-
-  revalidateCampaigns();
+  if (!DELETABLE_STATUSES.includes(campaign.status)) return { error: NOT_DELETABLE };
+  if ((await removeCampaigns(session, [campaign.id])) === 0) return { error: "This campaign can't be deleted right now." };
   redirect("/campaigns");
+}
+
+/** Delete from the campaigns list: stays on the same tab. */
+export async function deleteCampaignInList(campaignId: string): Promise<ActionState> {
+  const session = await requirePermission("delete");
+  const campaign = await findCampaign(campaignId);
+  if (!campaign) return NOT_FOUND;
+  if (!DELETABLE_STATUSES.includes(campaign.status)) return { error: NOT_DELETABLE };
+  if ((await removeCampaigns(session, [campaign.id])) === 0) return { error: "This campaign can't be deleted right now." };
+  return { ok: true, message: "Deleted." };
 }

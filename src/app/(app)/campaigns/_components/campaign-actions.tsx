@@ -3,9 +3,11 @@
 import { useActionState, useEffect, useId, useRef, useState } from "react";
 import { Button, SubmitButton } from "@/components/ui/button";
 import { Alert, Input } from "@/components/ui/form";
+import { useCan } from "@/components/role-context";
 import {
   archiveCampaign,
   bulkCampaigns,
+  deleteCampaignInList,
   duplicateCampaign,
   moveCampaign,
   restoreCampaign,
@@ -27,12 +29,13 @@ function FolderInput({ folders, defaultValue, listId }: { folders: string[]; def
   );
 }
 
-/** "More" on a campaign row: duplicate, archive / restore, move to a folder. */
+/** "More" on a campaign row: duplicate, archive / restore, move to a folder, delete. */
 export function CampaignMoreMenu({
   campaignId,
   name,
   archived,
   canArchive,
+  canDelete,
   folder,
   folders,
 }: {
@@ -40,6 +43,8 @@ export function CampaignMoreMenu({
   name: string;
   archived: boolean;
   canArchive: boolean;
+  /** Drafts and finished campaigns; scheduled or sending ones must be stopped first. */
+  canDelete: boolean;
   folder: string | null;
   folders: string[];
 }) {
@@ -52,11 +57,14 @@ export function CampaignMoreMenu({
     {},
   );
   const [moveState, moveAction] = useActionState<ActionState, FormData>(moveCampaign.bind(null, campaignId), {});
-  const error = dupState.error ?? archiveState.error ?? moveState.error;
+  const [deleteState, deleteAction] = useActionState<ActionState, FormData>(() => deleteCampaignInList(campaignId), {});
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const mayDelete = useCan("delete") && canDelete;
+  const error = dupState.error ?? archiveState.error ?? moveState.error ?? deleteState.error;
 
   useEffect(() => {
-    if (archiveState.ok || moveState.ok) dialogRef.current?.close();
-  }, [archiveState, moveState]);
+    if (archiveState.ok || moveState.ok || deleteState.ok) dialogRef.current?.close();
+  }, [archiveState, moveState, deleteState]);
 
   return (
     <>
@@ -66,6 +74,7 @@ export function CampaignMoreMenu({
       <dialog
         ref={dialogRef}
         aria-labelledby={titleId}
+        onClose={() => setConfirmingDelete(false)}
         className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-lg bg-white p-0 text-left shadow-xl ring-1 ring-slate-200 backdrop:bg-slate-900/40"
       >
         <div className="space-y-4 p-6">
@@ -97,6 +106,25 @@ export function CampaignMoreMenu({
             </div>
             <p className="text-xs text-slate-500">Leave empty to take it out of its folder.</p>
           </form>
+          {mayDelete ? (
+            confirmingDelete ? (
+              <form action={deleteAction} className="space-y-2 rounded-md bg-red-50 p-3 ring-1 ring-inset ring-red-200">
+                <p className="text-sm text-red-900">Delete this campaign? Its results are deleted too. Your contacts stay as they are.</p>
+                <div className="flex gap-2">
+                  <SubmitButton variant="danger" size="sm" pendingText="Deleting...">
+                    Delete
+                  </SubmitButton>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setConfirmingDelete(false)}>
+                    Keep it
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <Button type="button" variant="ghost" className="text-red-600 hover:text-red-700" onClick={() => setConfirmingDelete(true)}>
+                Delete
+              </Button>
+            )
+          ) : null}
           <div className="flex justify-end">
             <Button type="button" variant="secondary" onClick={() => dialogRef.current?.close()}>
               Close
@@ -130,12 +158,15 @@ export function SelectAllCampaigns() {
   );
 }
 
-/** Appears when campaigns are ticked: Duplicate / Archive (or Restore) / Move to folder. */
+/** Appears when campaigns are ticked: Duplicate / Archive (or Restore) / Move to folder / Delete. */
 export function BulkBar({ archivedTab, folders }: { archivedTab: boolean; folders: string[] }) {
   const [count, setCount] = useState(0);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const mayDelete = useCan("delete");
   const listId = useId();
   const [state, formAction] = useActionState<ActionState, FormData>(async (prev, formData) => {
     const result = await bulkCampaigns(prev, formData);
+    setConfirmingDelete(false);
     if (result.ok) {
       for (const box of bulkBoxes()) box.checked = false;
       for (const all of document.querySelectorAll<HTMLInputElement>("input[data-bulk-all]")) all.checked = false;
@@ -149,6 +180,7 @@ export function BulkBar({ archivedTab, folders }: { archivedTab: boolean; folder
       const target = event.target as HTMLInputElement | null;
       if (target?.name === "ids" && target.getAttribute("form") === BULK_FORM_ID) {
         setCount(bulkBoxes().filter((b) => b.checked).length);
+        setConfirmingDelete(false);
       }
     };
     document.addEventListener("change", onChange);
@@ -177,6 +209,25 @@ export function BulkBar({ archivedTab, folders }: { archivedTab: boolean; folder
               Move to folder
             </SubmitButton>
           </span>
+          {mayDelete ? (
+            confirmingDelete ? (
+              <span className="flex flex-wrap items-center gap-2 rounded-md bg-red-50 px-3 py-1.5 ring-1 ring-inset ring-red-200">
+                <span className="text-sm text-red-900">
+                  Delete {count} {count === 1 ? "campaign" : "campaigns"} and their results?
+                </span>
+                <SubmitButton name="intent" value="delete" variant="danger" size="sm" pendingText="Deleting...">
+                  Delete
+                </SubmitButton>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setConfirmingDelete(false)}>
+                  Keep
+                </Button>
+              </span>
+            ) : (
+              <Button type="button" variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => setConfirmingDelete(true)}>
+                Delete
+              </Button>
+            )
+          ) : null}
         </div>
       ) : null}
     </form>

@@ -370,6 +370,7 @@ function CampaignRow({
               name={title || "Untitled campaign"}
               archived={row.archived}
               canArchive={ARCHIVABLE_STATUSES.includes(row.status)}
+              canDelete={row.status === "draft" || row.status === "sent" || row.status === "cancelled"}
               folder={row.folder}
               folders={folders}
             />

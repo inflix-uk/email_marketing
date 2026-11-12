@@ -63,7 +63,7 @@ export async function CampaignEditor({ campaign, notice }: { campaign: Campaign;
         title={displaySubject(campaign.subject) || "Untitled campaign"}
         description={<StatusBadge status={campaign.status} />}
         actions={
-          campaign.status === "draft" ? (
+          campaign.status === "draft" && can(session.role, "delete") ? (
             <ConfirmButton
               action={deleteCampaign.bind(null, campaign.id)}
               label="Delete"

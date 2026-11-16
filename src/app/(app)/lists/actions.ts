@@ -6,6 +6,8 @@ import { requirePermission } from "@/lib/auth";
 import { addEmailsToList, createList, deleteList, removeListMember, updateList, type AddEmailsResult } from "@/lib/contacts/mutations";
 import { getList } from "@/lib/contacts/queries";
 import { listInputSchema, parseEmailList } from "@/lib/contacts/validation";
+import { audit } from "@/lib/audit";
+import { ensureListSignupForm, setListSignupActive } from "@/lib/forms/list-signup";
 
 export interface ListFormState {
   ok?: boolean;
@@ -104,4 +106,24 @@ export async function addEmailsAction(listId: string, _prev: AddEmailsState, for
   const result = await addEmailsToList(listId, emails);
   revalidateLists(listId);
   return { result, invalid: invalid.slice(0, 20), invalidCount: invalid.length };
+}
+
+// --- Website sign-up ------------------------------------------------------------
+
+/** Create the list's website sign-up form (once). */
+export async function connectSignupAction(listId: string): Promise<void> {
+  const session = await requirePermission("edit");
+  const list = await getList(listId);
+  if (!list) redirect("/lists");
+  const form = await ensureListSignupForm(list);
+  await audit(session, "list.signup_connect", { type: "list", id: list.id, details: { formId: form.id } });
+  revalidateLists(list.id);
+}
+
+/** Pause or resume website sign-ups for the list. */
+export async function setSignupActiveAction(listId: string, formId: string, active: boolean): Promise<void> {
+  const session = await requirePermission("edit");
+  await setListSignupActive(formId, active);
+  await audit(session, active ? "list.signup_resume" : "list.signup_pause", { type: "list", id: listId, details: { formId } });
+  revalidateLists(listId);
 }

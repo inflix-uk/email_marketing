@@ -179,7 +179,7 @@ export async function processDueAutomations(opts?: { limit?: number; signal?: Ab
       sent: 0,
       halted: false,
       // Signed-link context + footer address, once per run.
-      build: { links: await getLinkContext(), companyAddress: settings.companyAddress },
+      build: { links: await getLinkContext(), companyAddress: settings.companyAddress, unsubscribeFooter: settings.unsubscribeFooter },
       signal,
       aborted: null,
     };

@@ -190,7 +190,14 @@ export function SenderForm({
   initial,
   appUrlSaved,
 }: {
-  initial: { fromName: string; fromEmail: string; replyTo: string; companyAddress: string; appUrl: string };
+  initial: {
+    fromName: string;
+    fromEmail: string;
+    replyTo: string;
+    companyAddress: string;
+    unsubscribeFooter: boolean;
+    appUrl: string;
+  };
   /** false = the website address is a suggestion from this page's address, not stored yet. */
   appUrlSaved: boolean;
 }) {
@@ -235,6 +242,23 @@ export function SenderForm({
             placeholder="Acme Ltd, 1 High Street, Leeds LS1 1AA"
           />
         </Field>
+        <div className="sm:col-span-2">
+          <label className="flex items-start gap-3 text-sm text-slate-900">
+            <input
+              type="checkbox"
+              name="unsubscribeFooter"
+              defaultChecked={initial.unsubscribeFooter}
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600"
+            />
+            <span>
+              <span className="font-medium">Add an unsubscribe footer</span>
+              <span className="block text-slate-500">
+                Added only when the email has no {"{{unsubscribe_url}}"} link. Turn it off if your templates already have
+                their own unsubscribe link.
+              </span>
+            </span>
+          </label>
+        </div>
         <Field
           label="Website address of this app"
           htmlFor="app-url"

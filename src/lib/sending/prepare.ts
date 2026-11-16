@@ -43,6 +43,8 @@ export interface CampaignBuildContext {
   links: LinkContext;
   /** Postal address for {{company_address}} and the automatic footer. */
   companyAddress: string;
+  /** false = never add the automatic unsubscribe footer (Settings). Missing = add it. */
+  unsubscribeFooter?: boolean;
 }
 
 export type BuildOptions = {
@@ -50,6 +52,8 @@ export type BuildOptions = {
   unsubscribeUrl: string;
   /** Postal address for {{company_address}} and the automatic footer. */
   companyAddress?: string;
+  /** false = never add the automatic unsubscribe footer (Settings). Missing = add it. */
+  unsubscribeFooter?: boolean;
 } & (
   | {
       /**
@@ -78,6 +82,7 @@ export function buildCampaignEmail(
     links: ctx.links,
     unsubscribeUrl: buildUnsubscribeUrl(ctx.links, sendId),
     companyAddress: ctx.companyAddress,
+    unsubscribeFooter: ctx.unsubscribeFooter,
   });
 }
 
@@ -88,8 +93,10 @@ export function buildEmail(content: EmailContent, contact: MergeContact, opts: B
   const subject = renderSubject(content.subject, data);
   let html = renderMergeTags(content.html, data, { escape: true });
 
-  // Every marketing email must carry a working unsubscribe link.
-  if (!hasUnsubscribeTag(content.html)) {
+  // Every marketing email must carry a working unsubscribe link: add a footer when the
+  // design has none, unless it's turned off in Settings (the text part and the
+  // List-Unsubscribe header still carry the link).
+  if (opts.unsubscribeFooter !== false && !hasUnsubscribeTag(content.html)) {
     html = appendUnsubscribeFooter(html, opts.unsubscribeUrl, companyAddress);
   }
 

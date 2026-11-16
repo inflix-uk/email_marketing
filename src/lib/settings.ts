@@ -23,6 +23,8 @@ export interface AppSettings {
   replyTo: string;
   /** Postal address shown in email footers (required by anti-spam laws). */
   companyAddress: string;
+  /** Add an unsubscribe footer to emails whose design has no {{unsubscribe_url}} link. */
+  unsubscribeFooter: boolean;
   /** Max emails the worker sends per second. */
   sendRatePerSecond: number;
   /** Max emails per calendar day (UTC) across campaigns + automations. 0 = no limit. Use it to warm up a new domain. */
@@ -47,6 +49,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fromEmail: "",
   replyTo: "",
   companyAddress: "",
+  unsubscribeFooter: true,
   sendRatePerSecond: 5,
   dailySendLimit: 0,
   bouncePauseRate: 8,
@@ -68,6 +71,7 @@ function merge(doc: SettingsDoc | null): AppSettings {
       fromEmail: doc?.fromEmail,
       replyTo: doc?.replyTo,
       companyAddress: doc?.companyAddress,
+      unsubscribeFooter: doc?.unsubscribeFooter,
       sendRatePerSecond: doc?.sendRatePerSecond,
       dailySendLimit: doc?.dailySendLimit,
       bouncePauseRate: doc?.bouncePauseRate,

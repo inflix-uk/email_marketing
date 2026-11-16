@@ -170,6 +170,8 @@ const senderSchema = z.object({
   // Empty = replies go to the From email.
   replyTo: z.union([z.literal(""), email("Enter a valid reply-to address, or leave it empty")]),
   companyAddress: z.string().trim().max(500, "Keep the address under 500 characters"),
+  // Checkbox: present ("on") when ticked, missing when not.
+  unsubscribeFooter: z.string().optional().transform((v) => v === "on"),
   appUrl: z
     .string()
     .trim()

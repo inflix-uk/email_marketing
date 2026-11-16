@@ -107,6 +107,7 @@ export default async function SettingsPage() {
                     fromEmail: settings.fromEmail,
                     replyTo: settings.replyTo,
                     companyAddress: settings.companyAddress,
+                    unsubscribeFooter: settings.unsubscribeFooter,
                     appUrl,
                   }}
                   appUrlSaved={!suggest}

@@ -401,7 +401,11 @@ export async function processBatch(opts: ProcessBatchOptions = {}): Promise<Batc
   }
 
   // Signed-link context + footer address, once per batch.
-  const build: CampaignBuildContext = { links: await getLinkContext(), companyAddress: settings.companyAddress };
+  const build: CampaignBuildContext = {
+    links: await getLinkContext(),
+    companyAddress: settings.companyAddress,
+    unsubscribeFooter: settings.unsubscribeFooter,
+  };
 
   const pacer = opts.pacer ?? defaultPacer;
   const touched = new Set<string>();

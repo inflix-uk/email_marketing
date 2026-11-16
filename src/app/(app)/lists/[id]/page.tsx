@@ -64,12 +64,12 @@ export default async function ListPage({ params, searchParams }: Props) {
           <CardHeader title="Add people" />
           <CardBody className="space-y-3">
             <AddEmailsForm action={addEmailsAction.bind(null, id)} />
-            <p className="text-sm text-slate-500">
-              Or{" "}
-              <Link href={`/contacts/import?list=${id}`} className="font-medium text-indigo-600 hover:text-indigo-500">
-                import a CSV file
-              </Link>
-            </p>
+            <div className="border-t border-slate-200 pt-3">
+              <ButtonLink href={`/contacts/import?list=${id}`} variant="secondary" className="w-full justify-center">
+                Upload a CSV to this list
+              </ButtonLink>
+              <p className="mt-1.5 text-xs text-slate-500">People already on this list aren&apos;t added twice.</p>
+            </div>
           </CardBody>
         </Card>
 

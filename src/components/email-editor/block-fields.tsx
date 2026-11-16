@@ -85,6 +85,7 @@ function TextFields({ idPrefix, block, onChange, styles }: FieldsProps<TextBlock
         label="Text"
         value={block.text}
         onChange={(text) => onChange({ ...block, text, format: "html" })}
+        images
       />
       <ChoiceField
         label="Text size"

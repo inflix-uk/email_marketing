@@ -1,13 +1,15 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
-import { ALIGNMENTS, normalizeHexColor, sanitizeLinkUrl, type Align } from "@/lib/email-design";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { ALIGNMENTS, normalizeHexColor, sanitizeImageUrl, sanitizeLinkUrl, type Align } from "@/lib/email-design";
+import { escapeHtml } from "@/lib/render";
 import { cn } from "@/lib/utils";
 import { Select } from "@/components/ui/select";
 import { applyEditToElement } from "./apply-edit";
 import { Segmented, SegmentButton } from "./controls";
 import { InsertVariableMenu } from "./insert-variable-menu";
-import { RichTextEditor } from "./rich-text-editor";
+import { ImagePicker } from "./image-picker";
+import { RichTextEditor, type InsertAtCaret } from "./rich-text-editor";
 import { insertText, type TextEdit } from "./text-edit";
 
 // Form controls for the visual editor's side panel. All of them are
@@ -182,6 +184,7 @@ export function RichTextField({
   onChange,
   rows = 6,
   placeholder,
+  images = false,
 }: {
   id: string;
   label: string;
@@ -189,8 +192,10 @@ export function RichTextField({
   onChange: (value: string) => void;
   rows?: number;
   placeholder?: string;
+  /** Show an "Image" button that puts an uploaded image at the caret. */
+  images?: boolean;
 }) {
-  const insertRef = useRef<((text: string) => void) | null>(null);
+  const insertRef = useRef<InsertAtCaret | null>(null);
   const labelId = `${id}-label`;
   return (
     <div className="space-y-1">
@@ -198,7 +203,10 @@ export function RichTextField({
         <span id={labelId} className={labelClass}>
           {label}
         </span>
-        <InsertVariableMenu compact onInsert={(tag) => insertRef.current?.(tag)} />
+        <span className="flex items-center gap-1">
+          {images ? <InsertImageButton onInsert={(html) => insertRef.current?.(html, { html: true })} /> : null}
+          <InsertVariableMenu compact onInsert={(tag) => insertRef.current?.(tag)} />
+        </span>
       </div>
       <RichTextEditor
         id={id}
@@ -210,6 +218,144 @@ export function RichTextField({
         insertRef={insertRef}
       />
     </div>
+  );
+}
+
+/** Widest image put into a text block (px); the renderer caps it to the column again. */
+const MAX_INLINE_IMAGE_WIDTH = 600;
+
+/** The image's own width (capped), or 0 when it can't be loaded. */
+function naturalWidth(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(Math.min(img.naturalWidth || 0, MAX_INLINE_IMAGE_WIDTH));
+    img.onerror = () => resolve(0);
+    img.src = url;
+  });
+}
+
+/** "Image" beside a text field's label: upload or pick an image (or paste its address) and put it at the caret. */
+function InsertImageButton({ onInsert }: { onInsert: (html: string) => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(false);
+  const [address, setAddress] = useState("");
+  const [addressError, setAddressError] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const uid = useId();
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) dialog.showModal();
+    if (!open && dialog.open) dialog.close();
+  }, [open]);
+
+  function close() {
+    setOpen(false);
+    setAddress("");
+    setAddressError(false);
+  }
+
+  async function insert(url: string, alt: string) {
+    setBusy(true);
+    const width = await naturalWidth(url);
+    setBusy(false);
+    // Close the modal right away: while it is open the text behind it can't take focus.
+    dialogRef.current?.close();
+    close();
+    const widthAttr = width > 0 ? ` width="${width}"` : "";
+    onInsert(`<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}"${widthAttr}>`);
+  }
+
+  function insertAddress() {
+    const url = sanitizeImageUrl(address);
+    if (!url) {
+      setAddressError(true);
+      return;
+    }
+    void insert(url, "");
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        title="Add an image here"
+        onClick={() => setOpen(true)}
+        className="inline-flex h-6 items-center rounded px-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600"
+      >
+        Image
+      </button>
+      <dialog
+        ref={dialogRef}
+        aria-labelledby={`${uid}-title`}
+        className="m-auto w-[calc(100%-2rem)] max-w-md rounded-lg bg-white p-0 shadow-xl ring-1 ring-slate-200 backdrop:bg-slate-900/40"
+        onCancel={(event) => {
+          event.preventDefault();
+          close();
+        }}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) close();
+        }}
+      >
+        {open ? (
+          <div className="space-y-4 p-5">
+            <div>
+              <h2 id={`${uid}-title`} className="text-base font-semibold text-slate-900">
+                Add an image
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">It goes where the cursor was in the text.</p>
+            </div>
+            <ImagePicker value="" onPick={(url) => (url ? void insert(url, "") : undefined)} />
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-url`} className={labelClass}>
+                Or the image&apos;s web address
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id={`${uid}-url`}
+                  value={address}
+                  onChange={(e) => {
+                    setAddress(e.target.value);
+                    setAddressError(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault(); // never submit the surrounding form
+                      insertAddress();
+                    }
+                  }}
+                  placeholder="https://example.com/photo.jpg"
+                  inputMode="url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-invalid={addressError || undefined}
+                  className={control}
+                />
+                <button
+                  type="button"
+                  onClick={insertAddress}
+                  className="shrink-0 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-indigo-600"
+                >
+                  Add
+                </button>
+              </div>
+              {addressError ? <p className="text-xs text-red-600">Enter a full address starting with https://</p> : null}
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              {busy ? <span className="text-xs text-slate-500">Adding...</span> : null}
+              <button
+                type="button"
+                onClick={close}
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </dialog>
+    </>
   );
 }
 

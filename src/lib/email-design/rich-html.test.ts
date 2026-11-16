@@ -211,3 +211,45 @@ describe("designs with rich text", () => {
     assert.ok(html.includes(">ok</p>"));
   });
 });
+
+describe("images in text", () => {
+  it("keeps an image with an absolute http(s) source, its alt text and width", () => {
+    assert.equal(
+      sanitizeRichHtml('<p>Look <img src="https://example.com/a.png" alt="A  phone" width="320" onerror="x()" style="position:fixed"></p>'),
+      '<p>Look <img src="https://example.com/a.png" alt="A phone" width="320"></p>',
+    );
+  });
+
+  it("drops images whose source isn't a web address, and widths that aren't numbers", () => {
+    assert.equal(sanitizeRichHtml('<p><img src="javascript:alert(1)">a<img src="data:image/png;base64,AAAA">b<img src="/api/files/1">c</p>'), "<p>abc</p>");
+    assert.equal(sanitizeRichHtml('<p><img src="https://example.com/a.png" width="100%"></p>'), '<p><img src="https://example.com/a.png" alt=""></p>');
+    assert.ok(!sanitizeRichHtml('<p><img src="https://example.com/a.png&quot; onerror=&quot;x()"></p>').includes("onerror="));
+  });
+
+  it("keeps a linked image and counts an image-only text as content", () => {
+    const html = '<p><a href="https://example.com"><img src="https://example.com/a.png" alt=""></a></p>';
+    assert.equal(sanitizeRichHtml(html), html);
+    assert.equal(hasRichText('<p><img src="https://example.com/a.png" alt=""></p>'), true);
+    assert.equal(hasRichText('<p><img src="javascript:x" alt=""></p>'), false);
+  });
+
+  it("caps the width to the column in the email and adds email-safe styles", () => {
+    const [p] = richHtmlParagraphs('<p><img src="https://example.com/a.png" alt="" width="900"></p>', { imageMaxWidth: 520 });
+    assert.match(p, /width="520" style="width:520px;max-width:100%;height:auto;border:0;/);
+    const [small] = richHtmlParagraphs('<p><img src="https://example.com/a.png" alt="" width="80"></p>', { imageMaxWidth: 520 });
+    assert.match(small, /width="80" style="width:80px;max-width:100%/);
+    const [unknown] = richHtmlParagraphs('<p><img src="https://example.com/a.png" alt=""></p>', { imageMaxWidth: 520 });
+    assert.doesNotMatch(unknown, /width=/);
+  });
+
+  it("renders an image inside a text block of a design", () => {
+    const design = toDesign({
+      blocks: [{ id: "t", type: "text", format: "html", text: '<p>Hi<br><img src="https://example.com/a.png" alt="Phone" width="2000"></p>' }],
+    });
+    assert.ok(design);
+    const html = renderDesign(design);
+    assert.match(html, /<img src="https:\/\/example\.com\/a\.png" alt="Phone" width="\d+" style="width:\d+px;max-width:100%/);
+    const width = Number(/alt="Phone" width="(\d+)"/.exec(html)?.[1]);
+    assert.ok(width > 0 && width < 700, `width ${width} fits the email`);
+  });
+});

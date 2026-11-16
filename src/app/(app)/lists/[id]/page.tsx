@@ -7,6 +7,10 @@ import { Input } from "@/components/ui/form";
 import { Card, CardBody, CardHeader, StatusBadge, Table, TBody, Td, Th, PageHeader } from "@/components/ui/layout";
 import { parsePage } from "@/lib/contacts/filters";
 import { findListMembers, getList, getListStats } from "@/lib/contacts/queries";
+import { requireSession } from "@/lib/auth";
+import { findListSignupForm } from "@/lib/forms/list-signup";
+import { can } from "@/lib/permissions";
+import { getSettings } from "@/lib/settings";
 import { formatNumber } from "@/lib/utils";
 import { ClickableRow } from "../../contacts/_components/clickable-row";
 import { ConfirmDelete } from "../../contacts/_components/confirm-delete";
@@ -14,6 +18,7 @@ import { Pagination } from "../../contacts/_components/pagination";
 import { addEmailsAction, deleteListAction, removeMemberAction, updateListAction } from "../actions";
 import { ListForm } from "../list-form";
 import { AddEmailsForm } from "./add-emails-form";
+import { WebsiteSignup } from "./website-signup";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -33,7 +38,13 @@ export default async function ListPage({ params, searchParams }: Props) {
 
   const list = await getList(id);
   if (!list) notFound();
-  const [stats, members] = await Promise.all([getListStats(id), findListMembers(id, q, parsePage(query.page))]);
+  const [stats, members, signupForm, settings, session] = await Promise.all([
+    getListStats(id),
+    findListMembers(id, q, parsePage(query.page)),
+    findListSignupForm(id),
+    getSettings(),
+    requireSession(),
+  ]);
 
   return (
     <>
@@ -48,21 +59,21 @@ export default async function ListPage({ params, searchParams }: Props) {
       />
 
       {/* Wide screens: members on the left, the small forms on the right. Phones: "Add people" first. */}
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_auto_1fr]">
         <Card className="lg:col-start-2 lg:row-start-1">
           <CardHeader title="Add people" />
           <CardBody className="space-y-3">
             <AddEmailsForm action={addEmailsAction.bind(null, id)} />
-            <p className="text-sm text-slate-500">
-              Or{" "}
-              <Link href={`/contacts/import?list=${id}`} className="font-medium text-indigo-600 hover:text-indigo-500">
-                import a CSV file
-              </Link>
-            </p>
+            <div className="border-t border-slate-200 pt-3">
+              <ButtonLink href={`/contacts/import?list=${id}`} variant="secondary" className="w-full justify-center">
+                Upload a CSV to this list
+              </ButtonLink>
+              <p className="mt-1.5 text-xs text-slate-500">People already on this list aren&apos;t added twice.</p>
+            </div>
           </CardBody>
         </Card>
 
-        <Card className="self-start lg:col-start-1 lg:row-span-2 lg:row-start-1">
+        <Card className="self-start lg:col-start-1 lg:row-span-3 lg:row-start-1">
           {stats.total > 0 ? (
             <div className="border-b border-slate-200 px-4 py-3">
               <Form action={`/lists/${id}`} role="search" className="flex gap-2">
@@ -150,7 +161,15 @@ export default async function ListPage({ params, searchParams }: Props) {
           />
         </Card>
 
-        <Card className="self-start lg:col-start-2 lg:row-start-2">
+        <WebsiteSignup
+          listId={id}
+          form={signupForm}
+          appUrl={settings.appUrl}
+          canEdit={can(session.role, "edit")}
+          className="self-start lg:col-start-2 lg:row-start-2"
+        />
+
+        <Card className="self-start lg:col-start-2 lg:row-start-3">
           <CardBody className="space-y-4">
             <ListForm
               action={updateListAction.bind(null, id)}

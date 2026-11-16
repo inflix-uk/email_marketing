@@ -92,13 +92,13 @@ function renderHeading(block: HeadingBlock, ctx: Context): string {
  * A text / footer block's paragraphs as inline HTML. Stored HTML is
  * sanitised again here, so only the safe subset ever reaches an email.
  */
-function richParagraphs(block: Pick<TextBlock, "text" | "format">, link: string): string[] {
+function richParagraphs(block: Pick<TextBlock, "text" | "format">, link: string, imageMaxWidth: number): string[] {
   const html = block.format === "html" ? block.text : markdownToRichHtml(block.text);
-  return richHtmlParagraphs(html, { linkStyle: link });
+  return richHtmlParagraphs(html, { linkStyle: link, imageMaxWidth });
 }
 
-function renderText(block: TextBlock, ctx: Context): string {
-  const paragraphs = richParagraphs(block, linkStyle(ctx));
+function renderText(block: TextBlock, ctx: Context, availableWidth: number): string {
+  const paragraphs = richParagraphs(block, linkStyle(ctx), availableWidth);
   if (paragraphs.length === 0) return ctx.placeholders ? placeholder(ctx, "Empty text block") : "";
   const style =
     `font-family:${ctx.font};${TEXT_SIZES[block.size]}color:${block.color ?? ctx.styles.textColor};` +
@@ -152,7 +152,7 @@ function renderDivider(color: string): string {
 function renderColumnChild(child: ColumnChild, ctx: Context, width: number): { html: string; align: Align } {
   switch (child.type) {
     case "text":
-      return { html: renderText(child, ctx), align: "left" };
+      return { html: renderText(child, ctx, width), align: "left" };
     case "image":
       return { html: renderImage(child, ctx, width), align: child.align };
     case "button":
@@ -191,7 +191,7 @@ function renderRow(block: Exclude<Block, FooterBlock>, ctx: Context, availableWi
       return html ? { kind: "cell", html } : null;
     }
     case "text": {
-      const html = renderText(block, ctx);
+      const html = renderText(block, ctx, availableWidth);
       return html ? { kind: "cell", html } : null;
     }
     case "image": {
@@ -238,7 +238,7 @@ function renderFooter(block: FooterBlock, ctx: Context): string {
   const style =
     `padding:24px 16px;font-family:${ctx.font};font-size:12px;line-height:18px;color:${block.color};text-align:center;`;
   const link = linkStyle(ctx, block.color);
-  const text = richParagraphs(block, link).join("<br>\n");
+  const text = richParagraphs(block, link, ctx.styles.contentWidth - 32).join("<br>\n");
   const label = escapeText(block.unsubscribeLabel.trim() || "Unsubscribe");
   const lines = ["{{company_address}}", text, `<a href="{{unsubscribe_url}}" style="${link}">${label}</a>`];
   return (

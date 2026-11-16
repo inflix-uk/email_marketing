@@ -308,10 +308,12 @@ function ImportForm({ lists, defaultListId, onReset }: { lists: ListRef[]; defau
 }
 
 function ImportDone({ result, onReset }: { result: ImportResult; onReset: () => void }) {
-  const parts = [`${formatNumber(result.added)} added`];
-  if (result.updated > 0) parts.push(`${formatNumber(result.updated)} updated`);
-  if (result.unchanged > 0) parts.push(`${formatNumber(result.unchanged)} already there`);
+  const people = (n: number) => `${formatNumber(n)} ${n === 1 ? "person" : "people"}`;
+  const parts = [`${people(result.addedToList)} added to the list`];
+  if (result.alreadyInList > 0) parts.push(`${people(result.alreadyInList)} already on it (not added twice)`);
+  if (result.duplicates > 0) parts.push(`${formatNumber(result.duplicates)} repeated in the file (counted once)`);
   if (result.skipped > 0) parts.push(`${formatNumber(result.skipped)} skipped (no valid email)`);
+  if (result.added > 0) parts.push(`${formatNumber(result.added)} new in your contacts`);
 
   return (
     <Card className="max-w-2xl">

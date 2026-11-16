@@ -47,7 +47,12 @@ export async function sendTestEmail(input: EmailContent, to: string[]): Promise<
   const failures: string[] = [];
   for (const address of addresses) {
     const contact = byEmail.get(address) ?? SAMPLE_CONTACT;
-    const msg = buildEmail(input, contact, { sendId: null, unsubscribeUrl, companyAddress: settings.companyAddress });
+    const msg = buildEmail(input, contact, {
+      sendId: null,
+      unsubscribeUrl,
+      companyAddress: settings.companyAddress,
+      unsubscribeFooter: settings.unsubscribeFooter,
+    });
     msg.to = address;
     msg.subject = `[Test] ${msg.subject}`;
     // Like a real send (inbox filters and checkers score this header); the preview link unsubscribes nobody.

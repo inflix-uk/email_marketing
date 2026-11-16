@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 // Text editor for the visual email editor's text blocks: you type formatted
 // text directly (contentEditable). Selecting text shows a small toolbar with
 // Bold, Italic, Underline and Link; clicking a link lets you change or remove
-// it. Whatever the browser produces is passed through sanitizeRichHtml() on
+// it. Images are inserted at the caret by the parent (see `insertRef`). Whatever the browser produces is passed through sanitizeRichHtml() on
 // every change, and the server sanitises again when it renders the email.
 
 export interface RichTextEditorProps {
@@ -32,9 +32,11 @@ export interface RichTextEditorProps {
   placeholder?: string;
   /** Minimum height in text lines. */
   minLines?: number;
-  /** Lets the parent insert text (e.g. a merge tag) at the last caret position. */
-  insertRef?: RefObject<((text: string) => void) | null>;
+  /** Lets the parent insert text (e.g. a merge tag) or, with `{ html: true }`, markup (an image) at the last caret position. */
+  insertRef?: RefObject<InsertAtCaret | null>;
 }
+
+export type InsertAtCaret = (content: string, options?: { html?: boolean }) => void;
 
 type Popover =
   | { kind: "none" }
@@ -158,7 +160,7 @@ export function RichTextEditor({ id, labelId, value, onChange, placeholder, minL
   // Let the parent insert merge tags where the caret was.
   useEffect(() => {
     if (!insertRef) return;
-    insertRef.current = (text: string) => {
+    insertRef.current = (content, options) => {
       const editor = editorRef.current;
       if (!editor) return;
       restoreRange(editor, savedRange.current);
@@ -169,7 +171,7 @@ export function RichTextEditor({ id, labelId, value, onChange, placeholder, minL
         range.collapse(false);
         restoreRange(editor, range);
       }
-      document.execCommand("insertText", false, text);
+      document.execCommand(options?.html ? "insertHTML" : "insertText", false, content);
       emit();
     };
     return () => {
@@ -307,7 +309,7 @@ export function RichTextEditor({ id, labelId, value, onChange, placeholder, minL
         }}
         className={cn(
           "block w-full overflow-y-auto rounded-md bg-white px-2.5 py-2 text-sm leading-5 text-slate-900 shadow-sm ring-1 ring-slate-300 ring-inset focus:ring-2 focus:ring-indigo-600 focus:outline-none",
-          "[&_a]:text-indigo-600 [&_a]:underline [&_p]:min-h-5 [&_p+p]:mt-2",
+          "[&_a]:text-indigo-600 [&_a]:underline [&_p]:min-h-5 [&_p+p]:mt-2 [&_img]:inline-block [&_img]:h-auto [&_img]:max-w-full [&_img]:align-middle",
         )}
         style={{ minHeight: `${minLines * 1.25 + 1}rem`, maxHeight: "24rem" }}
       />

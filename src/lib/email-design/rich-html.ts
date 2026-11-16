@@ -1,10 +1,11 @@
-import { escapeText, renderRichParagraphs, sanitizeLinkUrl } from "./rich-text";
+import { escapeText, renderRichParagraphs, sanitizeImageUrl, sanitizeLinkUrl } from "./rich-text";
 
 // The text editor's stored format: a small, safe subset of HTML.
 //
 //   <p>Hello <b>bold</b> <i>italic</i> <u>underline</u> <s>strike</s>
 //      <a href="https://example.com">a link</a><br>next line</p>
 //   <span style="color:#ff0000;font-weight:bold">styled</span>
+//   <img src="https://example.com/photo.png" alt="A photo" width="320">
 //
 // sanitizeRichHtml() turns anything (the editor's innerHTML, pasted HTML,
 // a stored design) into that subset. It runs in the editor on every change
@@ -212,6 +213,30 @@ export function safeStyle(style: string): string {
 export interface RichHtmlOptions {
   /** Inline style added to every link (the email renderer passes the accent colour). */
   linkStyle?: string;
+  /** Email renderer: images are never wider than this (px), and get email-safe inline styles. */
+  imageMaxWidth?: number;
+}
+
+/** Largest width kept on an image (px); wider values are dropped. */
+const MAX_IMAGE_WIDTH = 2000;
+const MAX_ALT_LENGTH = 300;
+
+/** A safe <img> (absolute http(s) source only), or "" when the source isn't allowed. */
+function imageTag(attrs: Record<string, string>, options: RichHtmlOptions): string {
+  const src = sanitizeImageUrl(attrs.src ?? "");
+  if (!src) return "";
+  const alt = (attrs.alt ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_ALT_LENGTH);
+  const rawWidth = (attrs.width ?? "").trim();
+  const parsed = /^\d{1,4}$/.test(rawWidth) ? Number(rawWidth) : 0;
+  let width = parsed >= 1 && parsed <= MAX_IMAGE_WIDTH ? parsed : 0;
+  let style = "";
+  if (options.imageMaxWidth) {
+    // Outlook ignores max-width, so a known width is capped to the column.
+    if (width) width = Math.min(width, options.imageMaxWidth);
+    style =
+      ` style="${width ? `width:${width}px;` : ""}max-width:100%;height:auto;border:0;outline:none;text-decoration:none;vertical-align:middle;"`;
+  }
+  return `<img src="${escapeText(src)}" alt="${escapeText(alt)}"${width ? ` width="${width}"` : ""}${style}>`;
 }
 
 interface OpenInline {
@@ -289,7 +314,11 @@ export function richHtmlParagraphs(input: string, options: RichHtmlOptions = {})
         explicit = true;
         continue;
       }
-      if (token.selfClosing || name === "img" || name === "input" || name === "wbr" || name === "meta" || name === "link") {
+      if (name === "img") {
+        current += imageTag(token.attrs, options);
+        continue;
+      }
+      if (token.selfClosing || name === "input" || name === "wbr" || name === "meta" || name === "link") {
         continue;
       }
       const kept = INLINE_TAGS[name];
@@ -368,7 +397,7 @@ export function richHtmlToPlainText(html: string): string {
   return decodeEntities(text).replace(/\s+/g, " ").trim();
 }
 
-/** True when the rich HTML shows any text. */
+/** True when the rich HTML shows any text or image. */
 export function hasRichText(html: string): boolean {
-  return richHtmlToPlainText(html).length > 0;
+  return richHtmlToPlainText(html).length > 0 || richHtmlParagraphs(html).some((p) => p.includes("<img "));
 }

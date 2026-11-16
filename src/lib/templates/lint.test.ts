@@ -49,14 +49,14 @@ describe("lintEmailHtml", () => {
 
   it("warns when there is no unsubscribe link", () => {
     const issues = lintEmailHtml("<p>Hi there</p>");
-    assert.ok(hasMessage(issues, /unsubscribe footer will be added automatically/, "warning"));
+    assert.ok(hasMessage(issues, /unsubscribe footer will be added when sending/, "warning"));
     assert.deepEqual(lintEmailHtml("<p>Hi</p><a href='{{ UNSUBSCRIBE_URL }}'>x</a>"), []);
   });
 
   it("flags an unsubscribe tag that is only inside a comment (no footer gets added)", () => {
     const issues = lintEmailHtml("<p>Hi</p><!-- {{unsubscribe_url}} -->");
     assert.ok(hasMessage(issues, /only appears inside an HTML comment/, "warning"));
-    assert.ok(!hasMessage(issues, /footer will be added automatically/));
+    assert.ok(!hasMessage(issues, /footer will be added when sending/));
   });
 
   it("warns about script, form and iframe tags", () => {

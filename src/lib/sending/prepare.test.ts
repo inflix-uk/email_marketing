@@ -241,6 +241,14 @@ describe("automatic unsubscribe footer", () => {
     assert.match(msg.text ?? "", /Unsubscribe \(http/);
   });
 
+  it("is not added when turned off in Settings, but the text part and header still unsubscribe", () => {
+    const html = "<html><body><p>No link here</p></body></html>";
+    const msg = buildCampaignEmail(campaign({ html }), contact, SEND_ID, { ...CTX, unsubscribeFooter: false });
+    assert.doesNotMatch(msg.html, /You are receiving this email/);
+    assert.ok((msg.text ?? "").includes(`Unsubscribe: ${buildUnsubscribeUrl(LINKS, SEND_ID)}`));
+    assert.ok(msg.headers?.["List-Unsubscribe"]);
+  });
+
   it("recognises {{ unsubscribe_url | fallback }} as present", () => {
     const msg = buildCampaignEmail(campaign({ html: "<body><a href=\"{{ unsubscribe_url | # }}\">Leave</a></body>" }), contact, SEND_ID, CTX);
     assert.doesNotMatch(msg.html, /You are receiving this email/);

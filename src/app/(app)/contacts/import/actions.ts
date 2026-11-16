@@ -15,6 +15,12 @@ export interface ImportResult {
   unchanged: number;
   /** Rows without a valid email address. */
   skipped: number;
+  /** People who joined the list with this import (new or existing contacts). */
+  addedToList: number;
+  /** People in the file who were on the list already (not added twice). */
+  alreadyInList: number;
+  /** Rows repeating an email that appears earlier in the file. */
+  duplicates: number;
   list: { id: string; name: string };
 }
 
@@ -102,6 +108,9 @@ export async function importContactsAction(_prev: ImportState, formData: FormDat
       updated: outcome.updated,
       unchanged: outcome.existing - outcome.updated,
       skipped: mapped.invalidCount,
+      addedToList: outcome.addedToList,
+      alreadyInList: Math.max(0, mapped.contacts.length - outcome.addedToList),
+      duplicates: mapped.duplicateCount,
       list: { id: outcome.list.id, name: outcome.list.name },
     },
   };

@@ -78,7 +78,7 @@ export function lintEmailHtml(html: string): LintIssue[] {
     warnings.push(
       onlyInComments
         ? "{{unsubscribe_url}} only appears inside an HTML comment - recipients won't see an unsubscribe link, and no footer will be added. Use it in a visible link."
-        : "No {{unsubscribe_url}} link found - an unsubscribe footer will be added automatically when sending.",
+        : "No {{unsubscribe_url}} link found - an unsubscribe footer will be added when sending (unless it's turned off in Settings).",
     );
   }
 

@@ -239,8 +239,10 @@ function renderFooter(block: FooterBlock, ctx: Context): string {
     `padding:24px 16px;font-family:${ctx.font};font-size:12px;line-height:18px;color:${block.color};text-align:center;`;
   const link = linkStyle(ctx, block.color);
   const text = richParagraphs(block, link, ctx.styles.contentWidth - 32).join("<br>\n");
-  const label = escapeText(block.unsubscribeLabel.trim() || "Unsubscribe");
-  const lines = ["{{company_address}}", text, `<a href="{{unsubscribe_url}}" style="${link}">${label}</a>`];
+  // An empty link text hides the unsubscribe link (sending may still add its own footer - see Settings).
+  const label = block.unsubscribeLabel.trim();
+  const unsubscribe = label ? `<a href="{{unsubscribe_url}}" style="${link}">${escapeText(label)}</a>` : "";
+  const lines = ["{{company_address}}", text, unsubscribe];
   return (
     `<table ${TABLE} width="100%" style="max-width:${ctx.styles.contentWidth}px;">\n<tr>\n` +
     `<td align="center" style="${style}">\n${lines.filter(Boolean).join("<br>\n")}\n</td>\n</tr>\n</table>\n`

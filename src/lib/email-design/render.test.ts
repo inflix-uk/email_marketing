@@ -88,6 +88,12 @@ describe("renderDesign", () => {
     assert.match(html, /<a href="\{\{unsubscribe_url\}\}"[^>]*>Unsubscribe<\/a>/);
   });
 
+  it("leaves out the unsubscribe link when its text is empty", () => {
+    const html = render([{ id: "f", type: "footer", text: "Thanks", unsubscribeLabel: "  " }]);
+    assert.doesNotMatch(html, /\{\{unsubscribe_url\}\}/);
+    assert.match(html, /\{\{company_address\}\}/);
+  });
+
   it("moves a misplaced footer to the end and keeps only one", () => {
     const html = render([
       { id: "f1", type: "footer", text: "First footer" },

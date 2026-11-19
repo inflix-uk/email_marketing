@@ -228,7 +228,7 @@ function FooterFields({ idPrefix, block, onChange }: FieldsProps<FooterBlock>) {
         <Link href="/settings" className="font-medium text-indigo-600 hover:text-indigo-500">
           Settings
         </Link>
-        ) and an unsubscribe link.
+        ). Leave the unsubscribe link text empty to remove the link.
       </p>
       <RichTextField
         id={`${idPrefix}-text`}
@@ -242,7 +242,7 @@ function FooterFields({ idPrefix, block, onChange }: FieldsProps<FooterBlock>) {
         label="Unsubscribe link text"
         value={block.unsubscribeLabel}
         onChange={(unsubscribeLabel) => onChange({ ...block, unsubscribeLabel })}
-        placeholder="Unsubscribe"
+        placeholder="Empty = no unsubscribe link"
       />
       <ColorField
         id={`${idPrefix}-color`}
